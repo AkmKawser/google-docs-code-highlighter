@@ -1,6 +1,6 @@
 # ⚡ Google Docs Code, Table & Typography Suite
 
-> A smart Google Apps Script suite that formats document typography (Title, Heading 1, Sub-headings, Body), highlights code blocks with auto-indentation, and styles data tables with professional themes & zebra striping — with an interactive 3-tab sidebar and zero markdown backticks required.
+> A smart Google Apps Script suite that formats document typography (Title, Heading 1, Sub-headings, Body), highlights code blocks with rich token syntax and professional spacing normalization, and styles data tables with professional themes & zebra striping — featuring an interactive 3-tab sidebar and zero markdown backticks required.
 
 ![Google Apps Script](https://img.shields.io/badge/Google%20Apps%20Script-4285F4?style=for-the-badge&logo=google&logoColor=white)
 ![Google Docs](https://img.shields.io/badge/Google%20Docs-0F9D58?style=for-the-badge&logo=googledocs&logoColor=white)
@@ -10,12 +10,69 @@
 
 ## ✨ Features
 
+### ⚡ Smart Code Highlighter & Professional Spacing Normalizer
+- **🎨 Rich Multi-Token Syntax Highlighting**:
+  - **Functions & Methods**: Colors function calls (e.g. `calculateTotal()`, `insert()`, `console.log()`) and pseudocode method declarations.
+  - **Types & Classes**: Highlights primitive types (`int`, `float`, `string`, `bool`, `void`) and PascalCase class/interface names (`Invoice`, `Customer`, `DocumentApp`).
+  - **Keywords & Declarations**: Control flow (`if`, `else`, `return`, `try`, `catch`), storage declarations (`class`, `function`, `const`, `let`, `var`), and SQL statements (`SELECT`, `INSERT`, `UPDATE`, `DELETE`).
+  - **Special Identifiers**: Dedicated styling for `this`, `self`, and `super`.
+  - **Booleans & Constants**: Highlights `true`, `false`, `null`, `undefined`, `None`, and `ALL_CAPS` constants.
+  - **Strings & Comments**: Multi-line strings, template literals, single-line comments (`//`, `#`), and block comments (`/* ... */`).
+  - **Operators & Punctuation**: Colorizes `=>`, `===`, `!==`, `&&`, `||`, `+`, `-`, `*`, `/`, etc.
+- **🛡️ Non-Overlapping Token Masking**:
+  - Comments and strings claim character spans first, guaranteeing keywords and operators never incorrectly colorize text inside comments (e.g. `// class note`) or inside string literals.
+- **📐 Professional Code Spacing Normalization**:
+  - **Collapses Consecutive Empty Lines**: Normalizes runaway blank lines inside code blocks down to at most one clean empty line.
+  - **No Awkward Gaps**: Automatically strips blank lines immediately following class/function declarations (e.g., directly under `class Invoice:`) and before closing brackets.
+  - **Clean Pseudocode Continuations**: Tightens spacing around continuation markers (`...` or `…`) so they don't produce multi-line voids.
+  - **Trims Outer Padding**: Automatically removes empty lines from the top and bottom of every code block.
+- **📏 Zero Paragraph Margins inside Code Containers**:
+  - Explicitly sets `spacingBefore = 0` and `spacingAfter = 0` with `1.15` line spacing on all paragraphs within the code block table, eliminating Google Docs' default paragraph margins for a crisp, authentic IDE editor feel.
+- **🧠 Advanced Code & Pseudocode Detection**:
+  - **Class & Pseudocode Context**: Tracks class blocks to keep bare field names (`items`, `customer`), method signatures, and ellipsis markers together as a single unified code block without splitting.
+  - **Prose Rejection**: Ensures conversational sentences and narrative body paragraphs (e.g. "Issue: Invoice has four reasons to change...") always break out into normal text.
+  - **Curly Brace Nesting Engine**: Uses net `{` and `}` balance counting to guarantee functions, loops, and nested classes never get split into fragmented chunks.
+  - **🚫 No Markdown Required**: Triple backticks (```) are optional. Simply paste raw code or pseudocode anywhere in the document.
+- **📐 Smart Indentation Engine**:
+  - **Smart Auto-Indent (2 or 4 spaces)**: Syntax-aware indentation that calculates bracket nesting and colon-based pseudocode/Python headers (`calculateTotal():`), indenting method bodies while keeping sibling methods aligned.
+  - **Tab Normalization**: Converts hard tabs to 2-space or 4-space indentations.
+- **🎨 5 Built-in Code Themes + Custom**:
+  - **GitHub Light**: Clean light theme with royal purple functions, warm amber types, crimson keywords, and navy strings.
+  - **One Dark Pro (VS Code)**: Developer favorite with purple keywords, sky blue functions, gold types, and sage green strings.
+  - **Dracula Dark**: High-contrast dark theme with pink keywords, neon green functions, cyan types, and purple numbers.
+  - **Monokai Dark**: Iconic dark theme with hot pink keywords, lime green functions, and electric cyan types.
+  - **Solarized Light**: Classic warm theme with blue functions, gold types, and olive keywords.
+  - **Custom Palette**: Full RGB pickers for Background, Text, Border, Keywords, Functions, Types, Strings, Comments, and Numbers.
+- **↩ 1-Click Code Blocks Formatting Undo**: Safely unwraps 1x1 code block tables back into standard document paragraphs, preserving your original code text.
+
+---
+
+### 📊 Professional Table Formatter & Middle-of-Page Alignment
+- **📐 Automatic Middle Alignment**: Calculates page width and margins (`pageWidth - marginLeft - marginRight`) to center-align all tables symmetrically across the printable page with proportional column sizing.
+- **🎨 Colorful Professional Themes**:
+  - **Corporate Navy**: Deep royal navy headers with crisp ice-blue zebra striping.
+  - **Emerald Mint**: Modern forest green headers with fresh mint alternating rows.
+  - **Royal Indigo**: Deep violet headers with subtle lilac accents.
+  - **Sunset Crimson**: Rich ruby red headers with warm rose striping.
+  - **Ocean Teal**: Deep cyan/teal headers with aqua accents.
+  - **Executive Slate**: Sleek charcoal headers with cool gray striping.
+  - **Custom Palette**: Full RGB control over Header Background, Header Text, Alternating Row, Base Row, and Border colors.
+- **🦓 Smart Alternating Rows (Zebra Striping)**: Enhanced visual rhythm for scanning rows and dense data grids.
+- **🎯 Intelligent Cell Typography & Alignment**:
+  - **Font Families**: Roboto, Arial, Inter, Open Sans, Lato, Montserrat, Calibri, Trebuchet MS, Georgia, Merriweather, Times New Roman, Consolas, or JetBrains Mono.
+  - **Header Row**: Middle-aligned (centered) with larger bold typography (8.5–20pt) &mdash; table header row is always bold.
+  - **Table Text (Data Rows)**: Strictly left-aligned with top vertical alignment (always on top, never middle-aligned) and clean body typography (8–20pt).
+  - Refined cell padding (Compact, Normal, Relaxed) and soft borders.
+- **🛡️ Code Block Safety**: Automatically differentiates between regular data tables and code containers, keeping your syntax highlighting intact while centering both!
+- **↩ 1-Click Table Formatting Undo**: Reset all tables (or the selected table) back to clean standard document defaults with one click.
+
+---
+
 ### ✍️ Document Typography & Heading Formatter
 - **📖 Document Title Formatting (`TITLE`)**:
   - Independent typography controls: Font family, size (18–36pt), bold, text alignment (Center, Left, Right).
   - **Full Color Picking**: Individual pickers for text color and background color.
   - **Background Style Switch**: Switch between **Full-Width Header Banner** (seamless edge-to-edge block) or **Inline Text Highlight**.
-  - Background enable/disable toggle.
 - **📌 Main Headings Formatting (`HEADING_1`)**:
   - Font family, font size (14–24pt), bold, alignment.
   - Heading text color picker and background color picker.
@@ -33,47 +90,16 @@
   - **Emerald Forest**: Montserrat headers with fresh forest green banners.
   - **Editorial Classic**: Georgia serif styling with refined slate highlights.
   - **Crimson Luxe**: Montserrat headers with rich ruby banners.
-  - **Custom Configuration**: Full granular control over every font, color, and size.
 - **👁️ Live Interactive Typography Preview**: Shows real-time updates for Title, Heading 1, Sub-headings, and body paragraphs as you adjust fonts and colors.
 - **↩ 1-Click Document Typography Undo**: Reverts all headings, titles, and body paragraphs back to Google Docs defaults and unrolls header banners cleanly back into normal paragraphs.
 
 ---
 
-### 📊 Professional Table Formatter & Middle-of-Page Alignment
-- **📐 Automatic Middle Alignment**: Calculates page width and margins (`pageWidth - marginLeft - marginRight`) to center-align all tables symmetrically across the printable page with proportional column sizing.
-- **🎨 Colorful Professional Themes**:
-  - **Corporate Navy**: Deep royal navy headers with crisp ice-blue zebra striping.
-  - **Emerald Mint**: Modern forest green headers with fresh mint alternating rows.
-  - **Royal Indigo**: Deep violet headers with subtle lilac accents.
-  - **Sunset Crimson**: Rich ruby red headers with warm rose striping.
-  - **Ocean Teal**: Deep cyan/teal headers with aqua accents.
-  - **Executive Slate**: Sleek charcoal headers with cool gray striping.
-  - **Custom Palette**: Full RGB control over Header Background, Header Text, Alternating Row, Base Row, and Border colors.
-- **🦓 Smart Alternating Rows (Zebra Striping)**: Enhanced visual rhythm for scanning rows and dense data grids.
-- **🎯 Intelligent Cell Typography & Alignment**:
-  - **Font Families**: Roboto, Arial, Inter, Open Sans, Lato, Montserrat, Calibri, Trebuchet MS, Georgia, Merriweather, Times New Roman, Consolas, or JetBrains Mono.
-  - **Header Row**: Middle-aligned (centered) with larger bold typography (8.5–20pt) &mdash; table title row is always bold.
-  - **Table Text (Data Rows)**: Strictly left-aligned with top vertical alignment (always on top, never middle-aligned) and clean body typography (8–20pt).
-  - **Table Element**: Centered on page across document margins.
-  - Refined cell padding (Compact, Normal, Relaxed) and soft borders.
-- **🛡️ Code Block Safety**: Automatically differentiates between regular data tables and code containers, keeping your syntax highlighting intact while centering both!
-- **↩ 1-Click Table Formatting Undo**: Reset all tables (or the selected table) back to clean standard document defaults (white backgrounds, 1pt black borders, left alignment, default font) with one click.
-
----
-
-### ⚡ Smart Code Highlighter & Indentation
-- **⚡ 1-Click Formatting**: Formats every code block in your entire document in one click.
-- **📐 Smart Code Indentation Engine**:
-  - **Smart Auto-Indent (2 or 4 spaces)**: Syntax-aware indentation that automatically calculates brace nesting, function blocks, loops, and tags.
-  - **Tab Normalization**: Converts hard tabs into clean 2-space or 4-space indentations and normalizes irregular spacing.
-  - **Dedicated Indent Action**: Re-indent all existing code blocks or selected blocks directly from the sidebar or menu.
-- **↩ 1-Click Code Blocks Formatting Undo**: Safely unwraps 1x1 code block tables back into standard document paragraphs, removing background shading and syntax colors while preserving your code text.
-- **🔒 Curly Brace Tracking Engine**: Uses net `{` and `}` balance counting to guarantee functions, loops, and nested classes never get split into fragmented chunks, even across multiple blank lines.
-- **🚫 No Markdown Required**: You don't need to wrap code in triple backticks (\`\`\`). Simply paste your code anywhere in the document.
-- **🎨 Interactive Sidebar Themes**: GitHub Light, Dracula Dark, Monokai Dark, Solarized Light, or Custom.
-- **🔤 Expanded Monospace Fonts**: Consolas, JetBrains Mono, Roboto Mono, Courier New, Inconsolata, Source Code Pro, Space Mono, PT Mono, and Ubuntu Mono with font sizes from 8pt to 20pt (strictly clean regular weight, never bold).
-- **🧠 Prose Rejection Heuristics**: Distinguishes between actual code lines and natural conversational English sentences so regular text is never converted.
-- **💾 Auto-Saved Preferences**: Automatically remembers your chosen fonts, colors, padding, indentation, and font sizes for future sessions.
+### 🧹 Document Utilities & Cleaners
+- **🧹 Text Cleanup**: Normalizes multiple spaces into single spaces, trims trailing line whitespace, and converts straight quotes to curly quotes, double hyphens to em dashes (`—`), and `...` to `…`.
+- **📐 Paragraph Spacing Normalizer**: Standardizes heading spacing before/after, body spacing after, and sets `keepWithNext` on headings to prevent orphan headings at page breaks.
+- **🔖 Bookmark Cleaner**: 1-click removal of all blue named anchor bookmark flags from the document.
+- **✦ Inline Markdown Formatter**: Converts markdown markers (`**bold**`, `*italic*`, `~~strikethrough~~`, `==highlight==`) in body text into native styled Google Docs text.
 
 ---
 
@@ -87,7 +113,7 @@
 4. Copy the entire content of [`Code.js`](./Code.js) and paste it into `Code.gs`.
 5. Press **`Ctrl + S`** (or click the disk icon) to save.
 6. Return to your Google Docs tab and **refresh the page** (`Ctrl + R` or `F5`).
-7. You will now see a new menu: **⚡ Code & Table Tools** in the toolbar!
+7. You will now see a new menu: **⚡ Code, Table & Typography Suite** in the toolbar!
 
 ### Method 2: Google Clasp CLI
 
@@ -103,40 +129,46 @@ clasp push
 
 ## 📖 How to Use
 
-### 1. 🚀 1-Click Smart Auto-Format Entire Document (All-in-One)
+### 1. 🚀 1-Click Smart Auto-Format Entire Document
 - Click **⚡ Code, Table & Typography Suite** > **🚀 Smart Auto-Format Entire Document** (or click the top banner button in the sidebar).
-- Intelligently scans the entire document to auto-detect what formatting to apply:
-  - **Code Blocks**: Detects markdown fenced blocks (\`\`\`) and programming syntax &rarr; converts to styled, auto-indented code block tables.
-  - **Data Tables**: Detects data tables &rarr; centers across margins and applies colorful header and zebra striping.
-  - **Document Titles**: Detects titles by position, \`#\` prefix, or \`Title:\` tags &rarr; applies selected Title typography & banners.
-  - **Headings & Sub-Headings**: Detects \`#\`, \`##\`, \`###\`, numbered sections (\`1. Introduction\`, \`1.1 Overview\`, \`1.1.1 Details\`, \`Section 1:\`, \`Step 1:\`), outline letters (\`A.\`, \`a)\`, \`(1)\`), ALL-CAPS headers, and bold standalone lines &rarr; styles as Heading 1 or Sub-headings.
-  - **Body Text**: Applies clean body typography and automatically detects inline code tokens (\`code\`) with monospace highlight.
+- Intelligently scans the entire document with safe, isolated error boundaries:
+  - **Bookmarks**: Cleans up all document bookmark anchors.
+  - **Code Blocks**: Formats and indents code blocks with professional spacing and rich syntax colors.
+  - **Data Tables**: Centers data tables across margins with colorful headers and zebra striping.
+  - **Typography**: Auto-detects and styles Document Title, Headings, Sub-headings, Body text, and inline code highlights.
 
-### 2. Format Document Typography
-- Click **⚡ Code, Table & Typography Suite** > **✍️ Format Document Typography**.
-- Your document Title, Heading 1s, Sub-headings (H2, H3, Subtitle), and body paragraphs will be auto-detected and styled with your chosen theme, fonts, colors, and background banners.
-- Or highlight any passage and click **✍️ Format Selected Text Auto** to auto-detect and format only the selected lines.
-
-### 3. Format & Center All Tables
-- Click **⚡ Code, Table & Typography Suite** > **📊 Format & Center All Tables**.
-- All data tables will instantly be aligned in the middle of the page and styled with colorful headers, zebra striping, and clean borders.
-
-### 4. Open the Interactive 3-Tab Sidebar
+### 2. Open the Interactive 3-Tab Sidebar
 - Click **⚡ Code, Table & Typography Suite** > **Open Sidebar (Styles & Colors)**.
 - Switch between **✍️ Typography**, **📊 Tables**, and **⚡ Code** tabs:
-  - **Top Banner**: 1-Click **⚡ Auto-Format Entire Document**.
-  - **Typography Tab**: Select a preset (Executive Navy, Modern Tech, etc.) or customize title/heading/subheading colors, fonts, sizes, and banner styles with a live document preview. Includes **✍️ Auto-Detect & Format Selection**.
-  - **Tables Tab**: Choose your color theme (Corporate Navy, Emerald Mint, Royal Indigo, etc.), cell alignment, and padding with a real-time live table preview. Includes **↩ Undo All Tables Formatting** and **Undo Selected Table Only**.
-  - **Code Tab**: Pick syntax themes (GitHub Light, Dracula, Monokai), monospace font, and **Code Indentation** (Smart 2-Space, 4-Space, or Tab conversion). Includes **📐 Auto-Indent All Code Blocks**, **↩ Undo All Code Blocks Formatting**, and **Undo Selected Code Block**.
+  - **Typography Tab**: Select a preset or customize title/heading/subheading colors, fonts, sizes, and banner styles with a live document preview.
+  - **Tables Tab**: Choose your table color theme, cell alignment, and padding with a real-time live preview.
+  - **Code Tab**: Pick syntax themes (GitHub Light, One Dark Pro, Dracula, Monokai, Solarized Light), configure token colors for Keywords, Functions, Types, Strings, Comments, Numbers, and adjust auto-indentation.
 
-### 5. Highlight & Indent Code Blocks
+### 3. Format & Indent Code Blocks
 - Click **⚡ Code, Table & Typography Suite** > **⚡ Highlight All Code (Quick Run)**, or select code and click **Highlight Selected Code**.
-- Code blocks are automatically indented according to your chosen indentation preference. Fenced code blocks (\`\`\`) are cleanly parsed with fence markers stripped.
+- Code blocks are automatically formatted with zero paragraph gaps, standardized spacing, and syntax highlighted.
 
-### 6. Undo Formatting Anytime
-- Click **↩ Undo Document Text Formatting** to revert titles, headings, and body paragraphs back to clean Google Docs defaults and unroll banner tables.
-- Click **↩ Undo All Tables Formatting** to revert tables back to standard document defaults.
+### 4. Format & Center All Tables
+- Click **⚡ Code, Table & Typography Suite** > **📊 Format & Center All Tables**.
+- All data tables are aligned in the middle of the page and styled with colorful headers, zebra striping, and clean borders.
+
+### 5. Undo Formatting Anytime
+- Click **↩ Undo Document Text Formatting** to revert titles, headings, and body paragraphs back to clean Google Docs defaults.
+- Click **↩ Undo All Tables Formatting** to reset tables to standard document defaults.
 - Click **↩ Undo All Code Blocks Formatting** to convert 1x1 code block containers back to normal paragraphs.
+
+---
+
+## 🎨 Supported Code Themes
+
+| Theme | Background | Keywords | Functions | Types / Classes | Strings | Comments |
+|---|---|---|---|---|---|---|
+| **GitHub Light** | `#F6F8FA` | `#CF222E` (Red) | `#8250DF` (Purple) | `#953800` (Amber) | `#0A3069` (Navy) | `#6E7781` (Slate) |
+| **One Dark Pro** | `#21252B` | `#C678DD` (Purple) | `#61AFEF` (Sky Blue) | `#E5C07B` (Gold) | `#98C379` (Green) | `#5C6370` (Gray) |
+| **Dracula Dark** | `#282A36` | `#FF79C6` (Pink) | `#50FA7B` (Neon Green) | `#8BE9FD` (Cyan) | `#F1FA8C` (Yellow) | `#6272A4` (Lavender) |
+| **Monokai Dark** | `#272822` | `#F92672` (Hot Pink) | `#A6E22E` (Lime Green) | `#66D9EF` (Cyan) | `#E6DB74` (Yellow) | `#75715E` (Warm Gray) |
+| **Solarized Light** | `#FDF6E3` | `#859900` (Olive) | `#268BD2` (Blue) | `#B58900` (Gold) | `#2AA198` (Teal) | `#93A1A1` (Gray) |
+| **Custom Palette** | Custom RGB | Custom RGB | Custom RGB | Custom RGB | Custom RGB | Custom RGB |
 
 ---
 
@@ -158,7 +190,7 @@ clasp push
 
 ```text
 .
-├── Code.js            # Unified Apps Script logic for Tables & Code Blocks + Dual-tab UI Sidebar
+├── Code.js            # Unified Apps Script engine for Code, Tables, Typography & Sidebar
 ├── appsscript.json    # Apps Script manifest file
 ├── README.md          # Project documentation & user guide
 ├── LICENSE            # MIT License

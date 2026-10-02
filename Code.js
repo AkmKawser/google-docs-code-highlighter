@@ -273,6 +273,7 @@ function isCodeBlockTable(table) {
         const font = text.getFontFamily(0);
         if (font && (
           font === 'Consolas' ||
+          font === 'JetBrains Mono' ||
           font === 'Courier New' ||
           font === 'Roboto Mono' ||
           font === 'Inconsolata' ||
@@ -1181,7 +1182,7 @@ function getSidebarHtml() {
         <base target="_top">
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;700&family=Inter:wght@400;600;700&family=Lato:wght@400;700&family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600;700&family=Roboto+Mono:wght@400;700&family=Roboto:wght@400;500;700&family=Source+Code+Pro:wght@400;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600;700&family=Roboto+Mono:wght@400;700&family=Roboto:wght@400;500;700&family=Source+Code+Pro:wght@400;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
         <style>
           * { box-sizing: border-box; }
           body {
@@ -1487,6 +1488,7 @@ function getSidebarHtml() {
               <option value="Merriweather">Merriweather (Classic Serif)</option>
               <option value="Times New Roman">Times New Roman</option>
               <option value="Consolas">Consolas (Data Monospace)</option>
+              <option value="JetBrains Mono">JetBrains Mono (Code Monospace)</option>
             </select>
           </div>
 
@@ -1688,6 +1690,7 @@ function getSidebarHtml() {
             <label>Font Family</label>
             <select id="codeFontFamilySelect" onchange="updateCodePreview()">
               <option value="Consolas" selected>Consolas (Windows Default)</option>
+              <option value="JetBrains Mono">JetBrains Mono (Developer Favorite)</option>
               <option value="Roboto Mono">Roboto Mono (Modern)</option>
               <option value="Courier New">Courier New (Classic)</option>
               <option value="Inconsolata">Inconsolata (Clean)</option>

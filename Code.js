@@ -2539,10 +2539,12 @@ function formatDocumentTypography(options) {
 
   for (let i = 0; i < paragraphs.length; i++) {
     const p = paragraphs[i];
-    if (!p.getParent()) continue;
+    let pParent = null;
+    try { pParent = p.getParent(); } catch(e) { continue; }
+    if (!pParent) continue;
 
     // Skip items already inside a table cell (e.g. data tables, code blocks)
-    if (p.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) {
+    if (pParent.getType() === DocumentApp.ElementType.TABLE_CELL) {
       continue;
     }
 
@@ -2859,41 +2861,47 @@ function wrapParagraphInBanner(body, p, bgColor) {
  * Applies font, size, bold, color, and alignment styles to a heading paragraph
  */
 function applyHeadingStyles(para, config, inlineBgColor) {
-  if (!para) return;
+  if (!para || !config) return;
+  try {
+    let align = DocumentApp.HorizontalAlignment.LEFT;
+    if (config.alignment === 'CENTER') align = DocumentApp.HorizontalAlignment.CENTER;
+    if (config.alignment === 'RIGHT') align = DocumentApp.HorizontalAlignment.RIGHT;
+    if (config.alignment === 'JUSTIFY') align = DocumentApp.HorizontalAlignment.JUSTIFY;
+    try { para.setAlignment(align); } catch(e) {}
 
-  let align = DocumentApp.HorizontalAlignment.LEFT;
-  if (config.alignment === 'CENTER') align = DocumentApp.HorizontalAlignment.CENTER;
-  if (config.alignment === 'RIGHT') align = DocumentApp.HorizontalAlignment.RIGHT;
-  if (config.alignment === 'JUSTIFY') align = DocumentApp.HorizontalAlignment.JUSTIFY;
-  para.setAlignment(align);
+    const fontSize = Number(config.fontSize) || 16;
+    const fontFamily = config.fontFamily || 'Arial';
+    const textColor = config.textColor || '#000000';
+    const bold = config.bold !== undefined ? config.bold : true;
 
-  const fontSize = Number(config.fontSize) || 16;
-  const fontFamily = config.fontFamily || 'Arial';
-  const textColor = config.textColor || '#000000';
-  const bold = config.bold !== undefined ? config.bold : true;
+    try { para.setFontFamily(fontFamily); } catch(e) {}
+    try { para.setFontSize(fontSize); } catch(e) {}
+    try { para.setLineSpacing(1.15); } catch(e) {}
 
-  try { para.setFontFamily(fontFamily); } catch(e) {}
-  try { para.setFontSize(fontSize); } catch(e) {}
-  para.setLineSpacing(1.15);
-
-  const textObj = para.editAsText();
-  const textLen = textObj.getText().length;
-  if (textLen > 0) {
-    try { textObj.setFontFamily(0, textLen - 1, fontFamily); } catch(e) {
-      try { textObj.setFontFamily(fontFamily); } catch(e2) {}
+    let textObj = null;
+    try { textObj = para.editAsText(); } catch(e) {}
+    if (textObj) {
+      const textLen = textObj.getText().length;
+      if (textLen > 0) {
+        try { textObj.setFontFamily(0, textLen - 1, fontFamily); } catch(e) {
+          try { textObj.setFontFamily(fontFamily); } catch(e2) {}
+        }
+        try { textObj.setFontSize(0, textLen - 1, fontSize); } catch(e) {
+          try { textObj.setFontSize(fontSize); } catch(e2) {}
+        }
+        try { textObj.setBold(0, textLen - 1, bold); } catch(e) {
+          try { textObj.setBold(bold); } catch(e2) {}
+        }
+        try { textObj.setForegroundColor(0, textLen - 1, textColor); } catch(e) {
+          try { textObj.setForegroundColor(textColor); } catch(e2) {}
+        }
+        try { textObj.setBackgroundColor(0, textLen - 1, inlineBgColor || null); } catch(e) {
+          try { textObj.setBackgroundColor(inlineBgColor || null); } catch(e2) {}
+        }
+      }
     }
-    try { textObj.setFontSize(0, textLen - 1, fontSize); } catch(e) {
-      try { textObj.setFontSize(fontSize); } catch(e2) {}
-    }
-    try { textObj.setBold(0, textLen - 1, bold); } catch(e) {
-      try { textObj.setBold(bold); } catch(e2) {}
-    }
-    try { textObj.setForegroundColor(0, textLen - 1, textColor); } catch(e) {
-      try { textObj.setForegroundColor(textColor); } catch(e2) {}
-    }
-    try { textObj.setBackgroundColor(0, textLen - 1, inlineBgColor || null); } catch(e) {
-      try { textObj.setBackgroundColor(inlineBgColor || null); } catch(e2) {}
-    }
+  } catch(outerErr) {
+    Logger.log('applyHeadingStyles error: ' + outerErr);
   }
 }
 
@@ -2901,43 +2909,49 @@ function applyHeadingStyles(para, config, inlineBgColor) {
  * Applies typography options to a normal body paragraph
  */
 function formatSingleBodyParagraph(para, config) {
-  if (!para) return;
+  if (!para || !config) return;
+  try {
+    let align = DocumentApp.HorizontalAlignment.LEFT;
+    if (config.alignment === 'CENTER') align = DocumentApp.HorizontalAlignment.CENTER;
+    if (config.alignment === 'RIGHT') align = DocumentApp.HorizontalAlignment.RIGHT;
+    if (config.alignment === 'JUSTIFY') align = DocumentApp.HorizontalAlignment.JUSTIFY;
+    try { para.setAlignment(align); } catch(e) {}
 
-  let align = DocumentApp.HorizontalAlignment.LEFT;
-  if (config.alignment === 'CENTER') align = DocumentApp.HorizontalAlignment.CENTER;
-  if (config.alignment === 'RIGHT') align = DocumentApp.HorizontalAlignment.RIGHT;
-  if (config.alignment === 'JUSTIFY') align = DocumentApp.HorizontalAlignment.JUSTIFY;
-  para.setAlignment(align);
+    const fontSize = Number(config.fontSize) || 11;
+    const fontFamily = config.fontFamily || 'Arial';
+    const textColor = config.textColor || '#1F2937';
 
-  const fontSize = Number(config.fontSize) || 11;
-  const fontFamily = config.fontFamily || 'Arial';
-  const textColor = config.textColor || '#1F2937';
+    try { para.setFontFamily(fontFamily); } catch(e) {}
+    try { para.setFontSize(fontSize); } catch(e) {}
+    try { para.setLineSpacing(1.15); } catch(e) {}
 
-  try { para.setFontFamily(fontFamily); } catch(e) {}
-  try { para.setFontSize(fontSize); } catch(e) {}
-  para.setLineSpacing(1.15);
+    let textObj = null;
+    try { textObj = para.editAsText(); } catch(e) {}
+    if (textObj) {
+      const textLen = textObj.getText().length;
+      if (textLen > 0) {
+        try { textObj.setFontFamily(0, textLen - 1, fontFamily); } catch(e) {
+          try { textObj.setFontFamily(fontFamily); } catch(e2) {}
+        }
+        try { textObj.setFontSize(0, textLen - 1, fontSize); } catch(e) {
+          try { textObj.setFontSize(fontSize); } catch(e2) {}
+        }
+        try { textObj.setBold(0, textLen - 1, false); } catch(e) {
+          try { textObj.setBold(false); } catch(e2) {}
+        }
+        try { textObj.setForegroundColor(0, textLen - 1, textColor); } catch(e) {
+          try { textObj.setForegroundColor(textColor); } catch(e2) {}
+        }
+        try { textObj.setBackgroundColor(0, textLen - 1, null); } catch(e) {
+          try { textObj.setBackgroundColor(null); } catch(e2) {}
+        }
 
-  const textObj = para.editAsText();
-  const textLen = textObj.getText().length;
-  if (textLen > 0) {
-    try { textObj.setFontFamily(0, textLen - 1, fontFamily); } catch(e) {
-      try { textObj.setFontFamily(fontFamily); } catch(e2) {}
+        // Automatically detect and highlight inline code tokens (`code`)
+        try { applyInlineBodyCodeHighlight(textObj); } catch(e) {}
+      }
     }
-    try { textObj.setFontSize(0, textLen - 1, fontSize); } catch(e) {
-      try { textObj.setFontSize(fontSize); } catch(e2) {}
-    }
-    try { textObj.setBold(0, textLen - 1, false); } catch(e) {
-      try { textObj.setBold(false); } catch(e2) {}
-    }
-    try { textObj.setForegroundColor(0, textLen - 1, textColor); } catch(e) {
-      try { textObj.setForegroundColor(textColor); } catch(e2) {}
-    }
-    try { textObj.setBackgroundColor(0, textLen - 1, null); } catch(e) {
-      try { textObj.setBackgroundColor(null); } catch(e2) {}
-    }
-
-    // Automatically detect and highlight inline code tokens (`code`)
-    applyInlineBodyCodeHighlight(textObj);
+  } catch(outerErr) {
+    Logger.log('formatSingleBodyParagraph error: ' + outerErr);
   }
 }
 

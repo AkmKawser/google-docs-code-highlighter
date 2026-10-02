@@ -346,23 +346,34 @@ function isHeadingBannerTable(table) {
   if (isCodeBlockTable(table)) return false;
 
   const cell = row.getCell(0);
-  const bgColor = cell.getBackgroundColor();
-  const hasBg = bgColor && bgColor !== '#ffffff' && bgColor.toLowerCase() !== '#ffffff';
-
   const numChildren = cell.getNumChildren();
+
+  // First check: does the cell have a recognized heading paragraph?
+  let hasHeadingPara = false;
+  let hasNonEmptyText = false;
   for (let i = 0; i < numChildren; i++) {
     const child = cell.getChild(i);
     if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
-      const heading = child.asParagraph().getHeading();
+      const para = child.asParagraph();
+      const heading = para.getHeading();
       if (heading && heading !== DocumentApp.ParagraphHeading.NORMAL) {
-        return true;
+        hasHeadingPara = true;
+        break;
       }
+      if (para.getText().trim().length > 0) hasNonEmptyText = true;
     }
   }
+  if (hasHeadingPara) return true;
 
-  // 1x1 table with custom background color and 1-3 paragraphs is a heading banner table
-  if (hasBg && numChildren <= 3) {
-    return true;
+  // Second check: 1x1 table with 1-2 non-empty paragraphs and a non-white background
+  // Only do the background color API call if basic heuristics pass (avoids excess API calls)
+  if (hasNonEmptyText && numChildren <= 3) {
+    try {
+      const bgColor = cell.getBackgroundColor();
+      if (bgColor && bgColor !== '#ffffff' && bgColor.toLowerCase() !== '#ffffff' && bgColor !== null) {
+        return true;
+      }
+    } catch(e) {}
   }
 
   return false;
@@ -2971,9 +2982,8 @@ function unrollSingleHeadingBanner(body, table) {
       const p = child.asParagraph();
       const text = p.getText();
       let heading = p.getHeading();
-      if (!heading || heading === DocumentApp.ParagraphHeading.NORMAL) {
-        heading = DocumentApp.ParagraphHeading.TITLE;
-      }
+      // Only default to TITLE if paragraph is explicitly set as NORMAL and the cell had a heading banner
+      // Do not force-promote NORMAL paragraphs to TITLE — preserve the heading as-is
       if (i === 0 && text === '' && numChildren > 1) continue;
       const newP = body.insertParagraph(insertIndex + createdParas.length, text);
       safeSetHeading(newP, heading);

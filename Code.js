@@ -12,9 +12,12 @@ function onOpen() {
     .addSeparator()
     .addItem('📊 Format & Center All Tables', 'quickFormatAllTables')
     .addItem('📊 Format Selected Table', 'quickFormatSelectedTable')
+    .addItem('↩ Undo All Tables Formatting', 'quickUndoAllTables')
     .addSeparator()
     .addItem('⚡ Highlight All Code (Quick Run)', 'quickHighlightAll')
     .addItem('⚡ Highlight Selected Code', 'formatSelectedCodeBlock')
+    .addItem('📐 Auto-Indent All Code Blocks', 'quickIndentAllCode')
+    .addItem('↩ Undo All Code Blocks Formatting', 'quickUndoAllCodeBlocks')
     .addToUi();
 }
 
@@ -47,6 +50,14 @@ function quickFormatAllTables() {
 function quickFormatSelectedTable() {
   const prefs = getTablePreferences();
   const result = formatSelectedTable(prefs);
+  DocumentApp.getUi().alert('📊 Table Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Quick action to undo table formatting from the menu
+ */
+function quickUndoAllTables() {
+  const result = undoAllTableFormatting();
   DocumentApp.getUi().alert('📊 Table Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
 }
 
@@ -144,6 +155,104 @@ function getSelectedTable() {
   }
 
   return null;
+}
+
+/**
+ * Undoes custom formatting on all data tables in the document,
+ * reverting borders, backgrounds, padding, and text styling back to defaults.
+ * Skips code block tables.
+ */
+function undoAllTableFormatting() {
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  const tables = body.getTables();
+
+  if (!tables || tables.length === 0) {
+    return { success: true, count: 0, message: 'No tables found in this document.' };
+  }
+
+  let count = 0;
+  for (let i = 0; i < tables.length; i++) {
+    const table = tables[i];
+    if (isCodeBlockTable(table)) continue;
+    undoSingleTableFormatting(table);
+    count++;
+  }
+
+  return {
+    success: true,
+    count: count,
+    message: count > 0
+      ? 'Reset formatting for ' + count + ' table(s) to document defaults.'
+      : 'No data tables found to reset.'
+  };
+}
+
+/**
+ * Undoes formatting on the currently selected table.
+ */
+function undoSelectedTableFormatting() {
+  const table = getSelectedTable();
+  if (!table) {
+    return { success: false, message: 'Please place your cursor inside a table or select it first.' };
+  }
+  if (isCodeBlockTable(table)) {
+    return { success: false, message: 'The selected table is a code block. Use the Code Blocks tab to undo it.' };
+  }
+
+  undoSingleTableFormatting(table);
+  return { success: true, count: 1, message: 'Selected table formatting reset to defaults!' };
+}
+
+/**
+ * Resets a single table to standard clean document styling:
+ * - Borders: 1pt black
+ * - Background: white / clear
+ * - Padding: standard 5pt
+ * - Alignment: left
+ * - Font: Arial 10pt, black, regular (non-bold), no background highlights
+ */
+function undoSingleTableFormatting(table) {
+  const numRows = table.getNumRows();
+  if (numRows === 0) return;
+
+  table.setBorderWidth(1);
+  table.setBorderColor('#000000');
+
+  for (let r = 0; r < numRows; r++) {
+    const row = table.getRow(r);
+    const numCells = row.getNumCells();
+    for (let c = 0; c < numCells; c++) {
+      const cell = row.getCell(c);
+      cell.setBackgroundColor('#FFFFFF');
+      cell.setPaddingTop(5);
+      cell.setPaddingBottom(5);
+      cell.setPaddingLeft(5);
+      cell.setPaddingRight(5);
+      cell.setVerticalAlignment(DocumentApp.VerticalAlignment.TOP);
+
+      const numChildren = cell.getNumChildren();
+      for (let pIdx = 0; pIdx < numChildren; pIdx++) {
+        const child = cell.getChild(pIdx);
+        if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+          const para = child.asParagraph();
+          para.setAlignment(DocumentApp.HorizontalAlignment.LEFT);
+          try { para.setFontSize(10); } catch(e) {}
+          try { para.setFontFamily('Arial'); } catch(e) {}
+          para.setLineSpacing(1.15);
+
+          const textObj = para.editAsText();
+          if (textObj.getText().length > 0) {
+            try { textObj.setFontFamily('Arial'); } catch(e) {}
+            try { textObj.setFontSize(10); } catch(e) {}
+            try { textObj.setBold(false); } catch(e) {}
+            try { textObj.setForegroundColor('#000000'); } catch(e) {}
+            try { textObj.setBackgroundColor(null); } catch(e) {}
+          }
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -466,6 +575,17 @@ function quickHighlightAll() {
   DocumentApp.getUi().alert('⚡ Code Highlighter', result.message, DocumentApp.getUi().ButtonSet.OK);
 }
 
+function quickIndentAllCode() {
+  const prefs = getUserPreferences();
+  const result = indentAllCodeBlocks(prefs);
+  DocumentApp.getUi().alert('⚡ Code Indentation', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+function quickUndoAllCodeBlocks() {
+  const result = undoAllCodeBlocksFormatting();
+  DocumentApp.getUi().alert('⚡ Code Highlighter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
 /**
  * Core scanning & formatting function for code blocks
  */
@@ -646,20 +766,33 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
   cell.setPaddingBottom(8);
   cell.setPaddingLeft(12);
   cell.setPaddingRight(12);
-  cell.setText('');
 
   const fontSize = Number(options.fontSize) || 9.5;
   const fontFamily = options.fontFamily || 'Consolas';
   const textColor = options.textColor || '#24292F';
 
-  paragraphGroup.forEach(p => {
-    const line = cell.appendParagraph(p.getText());
+  // Apply indentation handling
+  const rawLines = paragraphGroup.map(p => p.getText());
+  const indentStyle = options.indentStyle || 'auto-2';
+  const formattedLines = formatCodeIndentation(rawLines, indentStyle);
+
+  formattedLines.forEach((textLine, idx) => {
+    let line;
+    if (idx === 0) {
+      line = cell.getChild(0).asParagraph();
+      line.setText(textLine);
+    } else {
+      line = cell.appendParagraph(textLine);
+    }
     line.setFontFamily(fontFamily);
     line.setFontSize(fontSize);
     line.setLineSpacing(1.15);
     line.setForegroundColor(textColor);
     
     applySyntaxHighlight(line.editAsText(), options);
+  });
+
+  paragraphGroup.forEach(p => {
     p.removeFromParent();
   });
 }
@@ -684,6 +817,305 @@ function formatSelectedCodeBlock(options) {
     return { success: true, count: 1, message: 'Selected code formatted!' };
   }
   return { success: false, message: 'No valid paragraphs selected.' };
+}
+
+/**
+ * Undoes all code blocks formatting across the document,
+ * converting 1x1 code block tables back into regular document paragraphs.
+ */
+function undoAllCodeBlocksFormatting() {
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  const tables = body.getTables();
+
+  if (!tables || tables.length === 0) {
+    return { success: true, count: 0, message: 'No code blocks found in this document.' };
+  }
+
+  let count = 0;
+  // Iterate backwards to preserve child index positions when removing tables
+  for (let i = tables.length - 1; i >= 0; i--) {
+    const table = tables[i];
+    if (isCodeBlockTable(table)) {
+      undoSingleCodeBlock(body, table);
+      count++;
+    }
+  }
+
+  return {
+    success: true,
+    count: count,
+    message: count > 0
+      ? 'Reverted ' + count + ' code block(s) back to standard document paragraphs.'
+      : 'No formatted code blocks found.'
+  };
+}
+
+/**
+ * Undoes formatting for the selected code block.
+ */
+function undoSelectedCodeBlockFormatting() {
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  const table = getSelectedTable();
+
+  if (!table || !isCodeBlockTable(table)) {
+    return { success: false, message: 'Please place your cursor inside a formatted code block first.' };
+  }
+
+  undoSingleCodeBlock(body, table);
+  return { success: true, count: 1, message: 'Selected code block reverted to standard text!' };
+}
+
+/**
+ * Converts a 1x1 code block table back into normal document paragraphs
+ */
+function undoSingleCodeBlock(body, table) {
+  const insertIndex = body.getChildIndex(table);
+  const cell = table.getRow(0).getCell(0);
+  const numChildren = cell.getNumChildren();
+
+  const lines = [];
+  for (let i = 0; i < numChildren; i++) {
+    const child = cell.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const text = child.asParagraph().getText();
+      // Skip empty first paragraph if dummy placeholder
+      if (i === 0 && text === '' && numChildren > 1) {
+        continue;
+      }
+      lines.push(text);
+    }
+  }
+
+  if (lines.length === 0) {
+    lines.push('');
+  }
+
+  // Insert standard paragraphs at the table's index
+  for (let i = 0; i < lines.length; i++) {
+    const p = body.insertParagraph(insertIndex + i, lines[i]);
+    p.setFontFamily('Arial');
+    p.setFontSize(11);
+    p.setLineSpacing(1.15);
+    p.setAlignment(DocumentApp.HorizontalAlignment.LEFT);
+    const textObj = p.editAsText();
+    if (textObj.getText().length > 0) {
+      try { textObj.setFontFamily('Arial'); } catch(e) {}
+      try { textObj.setFontSize(11); } catch(e) {}
+      try { textObj.setBold(false); } catch(e) {}
+      try { textObj.setForegroundColor('#000000'); } catch(e) {}
+      try { textObj.setBackgroundColor(null); } catch(e) {}
+    }
+  }
+
+  table.removeFromParent();
+}
+
+/**
+ * Auto-indents all formatted code blocks in the document according to options.indentStyle
+ */
+function indentAllCodeBlocks(options) {
+  options = options || getUserPreferences();
+  const indentStyle = options.indentStyle || 'auto-2';
+  saveUserPreferences(options);
+
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  const tables = body.getTables();
+
+  if (!tables || tables.length === 0) {
+    return { success: true, count: 0, message: 'No code blocks found in this document.' };
+  }
+
+  let count = 0;
+  for (let i = 0; i < tables.length; i++) {
+    const table = tables[i];
+    if (isCodeBlockTable(table)) {
+      indentSingleCodeBlock(table, indentStyle, options);
+      count++;
+    }
+  }
+
+  return {
+    success: true,
+    count: count,
+    message: count > 0
+      ? 'Indented ' + count + ' code block(s) with ' + getIndentLabel(indentStyle) + '!'
+      : 'No code blocks found to indent.'
+  };
+}
+
+/**
+ * Auto-indents the selected code block
+ */
+function indentSelectedCodeBlock(options) {
+  options = options || getUserPreferences();
+  const indentStyle = options.indentStyle || 'auto-2';
+  saveUserPreferences(options);
+
+  const table = getSelectedTable();
+  if (!table || !isCodeBlockTable(table)) {
+    return { success: false, message: 'Please place your cursor inside a formatted code block first.' };
+  }
+
+  indentSingleCodeBlock(table, indentStyle, options);
+  return { success: true, count: 1, message: 'Selected code block indented with ' + getIndentLabel(indentStyle) + '!' };
+}
+
+/**
+ * Indents a single code block in place
+ */
+function indentSingleCodeBlock(table, indentStyle, options) {
+  const cell = table.getRow(0).getCell(0);
+  const numChildren = cell.getNumChildren();
+  const paragraphs = [];
+  const rawLines = [];
+
+  for (let i = 0; i < numChildren; i++) {
+    const child = cell.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const p = child.asParagraph();
+      // Skip empty first paragraph if dummy placeholder
+      if (i === 0 && p.getText() === '' && numChildren > 1) {
+        continue;
+      }
+      paragraphs.push(p);
+      rawLines.push(p.getText());
+    }
+  }
+
+  if (rawLines.length === 0) return;
+
+  const indentedLines = formatCodeIndentation(rawLines, indentStyle);
+  const fontSize = Number(options.fontSize) || 9.5;
+  const fontFamily = options.fontFamily || 'Consolas';
+  const textColor = options.textColor || '#24292F';
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i];
+    p.setText(indentedLines[i]);
+    p.setFontFamily(fontFamily);
+    p.setFontSize(fontSize);
+    p.setLineSpacing(1.15);
+    p.setForegroundColor(textColor);
+    applySyntaxHighlight(p.editAsText(), options);
+  }
+}
+
+/**
+ * Formats code indentation across an array of text lines
+ */
+function formatCodeIndentation(textLines, indentStyle) {
+  if (!textLines || textLines.length === 0) return [];
+  if (!indentStyle || indentStyle === 'keep') return textLines;
+
+  if (indentStyle === 'tab-2') {
+    return textLines.map(line => line.replace(/\t/g, '  '));
+  }
+  if (indentStyle === 'tab-4') {
+    return textLines.map(line => line.replace(/\t/g, '    '));
+  }
+
+  const unit = (indentStyle === 'auto-4' || indentStyle === '4-spaces') ? '    ' : '  ';
+
+  let hasExistingIndent = false;
+  for (let i = 0; i < textLines.length; i++) {
+    if (/^\s+/.test(textLines[i]) && textLines[i].trim().length > 0) {
+      hasExistingIndent = true;
+      break;
+    }
+  }
+
+  if (hasExistingIndent) {
+    return normalizeExistingIndent(textLines, unit);
+  } else {
+    return smartIndentFlatLines(textLines, unit);
+  }
+}
+
+/**
+ * Normalizes existing irregular leading whitespace and tabs to clean unit levels
+ */
+function normalizeExistingIndent(textLines, unit) {
+  const unTabbed = textLines.map(line => line.replace(/\t/g, '  '));
+  let minIndent = 0;
+  for (let i = 0; i < unTabbed.length; i++) {
+    const match = unTabbed[i].match(/^ +/);
+    if (match) {
+      const len = match[0].length;
+      if (minIndent === 0 || (len < minIndent && len > 0)) {
+        minIndent = len;
+      }
+    }
+  }
+  if (minIndent === 0) minIndent = 2;
+
+  return unTabbed.map(line => {
+    if (line.trim().length === 0) return '';
+    const match = line.match(/^( +)/);
+    if (!match) return line.trim();
+    const spaces = match[1].length;
+    const level = Math.round(spaces / minIndent);
+    return unit.repeat(level) + line.trim();
+  });
+}
+
+/**
+ * Applies syntax and bracket-based smart auto-indentation to flat unindented code
+ */
+function smartIndentFlatLines(textLines, unit) {
+  let level = 0;
+  const result = [];
+
+  for (let i = 0; i < textLines.length; i++) {
+    const raw = textLines[i];
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) {
+      result.push('');
+      continue;
+    }
+
+    const clean = trimmed
+      .replace(/\/\*[\s\S]*?\*\/|\/\/.*$|#.*$/gm, '')
+      .replace(/(["'`])(?:(?=(\\?))\2[\s\S])*?\1/g, '');
+
+    const startsClosing = /^[}\])]|^(<\/[a-zA-Z0-9_-]+>)/.test(clean) ||
+                          /^(else|elif|catch|finally|except)\b/.test(clean);
+
+    if (startsClosing) {
+      level = Math.max(0, level - 1);
+    }
+
+    result.push(unit.repeat(level) + trimmed);
+
+    const opens = (clean.match(/[{[(]|<[a-zA-Z0-9_-]+(?:\s+[^>]*?)?(?<!\/)>/g) || []).length;
+    const closes = (clean.match(/[}\])]|<\/[a-zA-Z0-9_-]+>/g) || []).length;
+    let net = opens - closes;
+
+    if (/:\s*$/.test(clean) && !startsClosing && opens === 0 && closes === 0) {
+      net = 1;
+    }
+
+    if (startsClosing) {
+      level = Math.max(0, level + net + 1);
+    } else {
+      level = Math.max(0, level + net);
+    }
+  }
+
+  return result;
+}
+
+function getIndentLabel(style) {
+  switch (style) {
+    case 'auto-2': return 'Smart 2-Space Indent';
+    case 'auto-4': return 'Smart 4-Space Indent';
+    case 'tab-2': return '2 Spaces (Tabs Converted)';
+    case 'tab-4': return '4 Spaces (Tabs Converted)';
+    case 'keep': return 'Original Indentation';
+    default: return '2 Spaces';
+  }
 }
 
 function applySyntaxHighlight(textObj, options) {
@@ -715,13 +1147,15 @@ function saveUserPreferences(prefs) {
 
 function getUserPreferences() {
   const saved = PropertiesService.getUserProperties().getProperty('code_highlighter_prefs');
+  let prefs = null;
   if (saved) {
-    try { return JSON.parse(saved); } catch(e) {}
+    try { prefs = JSON.parse(saved); } catch(e) {}
   }
-  return {
+  return Object.assign({
     theme: 'github-light',
     fontSize: '9.5',
     fontFamily: 'Consolas',
+    indentStyle: 'auto-2',
     bgColor: '#F6F8FA',
     textColor: '#24292F',
     borderColor: '#D0D7DE',
@@ -729,7 +1163,7 @@ function getUserPreferences() {
     stringColor: '#0A3069',
     commentColor: '#6E7781',
     numberColor: '#953800'
-  };
+  }, prefs || {});
 }
 
 /* ==========================================================================
@@ -954,6 +1388,26 @@ function getSidebarHtml() {
           .btn-secondary:hover { background: #eff6ff; border-color: #93c5fd; }
           .btn-secondary:disabled { border-color: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
 
+          .btn-danger {
+            width: 100%;
+            background: #ffffff;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+            padding: 8px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.15s;
+          }
+          .btn-danger:hover { background: #fef2f2; border-color: #f87171; }
+          .btn-danger:disabled { border-color: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
+
           .status-box {
             font-size: 11px;
             margin-top: 10px;
@@ -1159,6 +1613,12 @@ function getSidebarHtml() {
           <button class="btn-secondary" id="btnFormatSelectedTable" onclick="runFormatSelectedTable()">
             Format Selected Table Only
           </button>
+          <button class="btn-danger" id="btnUndoAllTables" onclick="runUndoAllTables()">
+            <span>↩</span> Undo All Tables Formatting
+          </button>
+          <button class="btn-secondary" id="btnUndoSelectedTable" onclick="runUndoSelectedTable()" style="color:#6b7280;border-color:#e5e7eb;">
+            Undo Selected Table Only
+          </button>
           <div id="tableStatus" class="status-box"></div>
         </div>
 
@@ -1199,6 +1659,17 @@ function getSidebarHtml() {
               <option value="Space Mono">Space Mono (Geometric)</option>
               <option value="PT Mono">PT Mono</option>
               <option value="Ubuntu Mono">Ubuntu Mono</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>Code Indentation</label>
+            <select id="codeIndentSelect" onchange="updateCodePreview()">
+              <option value="auto-2">Smart Auto-Indent (2 Spaces)</option>
+              <option value="auto-4">Smart Auto-Indent (4 Spaces)</option>
+              <option value="tab-2">Convert Tabs → 2 Spaces</option>
+              <option value="tab-4">Convert Tabs → 4 Spaces</option>
+              <option value="keep">Preserve Original Indentation</option>
             </select>
           </div>
 
@@ -1247,8 +1718,8 @@ function getSidebarHtml() {
             <div class="preview-body">
               <div id="codePreviewBox" class="preview-code-box">
                 <span id="pKw" style="color: #0550AE; font-weight: bold;">function</span> <span id="pFn">renderChart</span>() {<br>
-                &nbsp;&nbsp;<span id="pCom" style="color: #6E7781;">// Align & format</span><br>
-                &nbsp;&nbsp;<span id="pKw2" style="color: #0550AE; font-weight: bold;">return</span> <span id="pStr" style="color: #0A3069;">"Success!"</span>;<br>
+                <span id="pIndent">&nbsp;&nbsp;</span><span id="pCom" style="color: #6E7781;">// Align & format</span><br>
+                <span id="pIndent2">&nbsp;&nbsp;</span><span id="pKw2" style="color: #0550AE; font-weight: bold;">return</span> <span id="pStr" style="color: #0A3069;">"Success!"</span>;<br>
                 }
               </div>
             </div>
@@ -1259,6 +1730,15 @@ function getSidebarHtml() {
           </button>
           <button class="btn-secondary" id="btnHighlightSelectedCode" onclick="runHighlightSelectedCode()">
             Format Selected Code
+          </button>
+          <button class="btn-secondary" id="btnIndentAllCode" onclick="runIndentAllCode()">
+            <span>📐</span> Auto-Indent All Code Blocks
+          </button>
+          <button class="btn-danger" id="btnUndoAllCode" onclick="runUndoAllCode()">
+            <span>↩</span> Undo All Code Blocks Formatting
+          </button>
+          <button class="btn-secondary" id="btnUndoSelectedCode" onclick="runUndoSelectedCode()" style="color:#6b7280;border-color:#e5e7eb;">
+            Undo Selected Code Block
           </button>
           <div id="codeStatus" class="status-box"></div>
         </div>
@@ -1455,6 +1935,39 @@ function getSidebarHtml() {
               .formatSelectedTable(getTableOptions());
           }
 
+          function runUndoAllTables() {
+            if (!confirm('Are you sure you want to reset all tables to document defaults?')) {
+              return;
+            }
+            setTableStatus('Resetting all tables to default...', 'loading');
+            document.getElementById('btnUndoAllTables').disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                document.getElementById('btnUndoAllTables').disabled = false;
+                setTableStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('btnUndoAllTables').disabled = false;
+                setTableStatus('Error: ' + err, 'error');
+              })
+              .undoAllTableFormatting();
+          }
+
+          function runUndoSelectedTable() {
+            setTableStatus('Resetting selected table...', 'loading');
+            document.getElementById('btnUndoSelectedTable').disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                document.getElementById('btnUndoSelectedTable').disabled = false;
+                setTableStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('btnUndoSelectedTable').disabled = false;
+                setTableStatus('Error: ' + err, 'error');
+              })
+              .undoSelectedTableFormatting();
+          }
+
           /* =========================================================
              CODE HIGHLIGHTER LOGIC
              ========================================================= */
@@ -1469,6 +1982,7 @@ function getSidebarHtml() {
           document.getElementById('codeThemeSelect').value = initialCodeTheme;
           document.getElementById('codeFontSizeSelect').value = '${codePrefs.fontSize || '9.5'}';
           document.getElementById('codeFontFamilySelect').value = '${codePrefs.fontFamily || 'Consolas'}';
+          document.getElementById('codeIndentSelect').value = '${codePrefs.indentStyle || 'auto-2'}';
 
           function onCodeThemeChange() {
             const val = document.getElementById('codeThemeSelect').value;
@@ -1502,6 +2016,14 @@ function getSidebarHtml() {
             box.style.borderColor = border;
             box.style.fontFamily = font + ', monospace';
 
+            // Indentation preview
+            const indentVal = document.getElementById('codeIndentSelect').value;
+            const indentSpaces = (indentVal === 'auto-4' || indentVal === 'tab-4') ? '&nbsp;&nbsp;&nbsp;&nbsp;' : '&nbsp;&nbsp;';
+            const pInd1 = document.getElementById('pIndent');
+            const pInd2 = document.getElementById('pIndent2');
+            if (pInd1) pInd1.innerHTML = indentSpaces;
+            if (pInd2) pInd2.innerHTML = indentSpaces;
+
             // Use token color pickers directly (updated by theme OR manual pick)
             document.getElementById('pKw').style.color  = document.getElementById('cKwColor').value;
             document.getElementById('pKw2').style.color = document.getElementById('cKwColor').value;
@@ -1514,6 +2036,7 @@ function getSidebarHtml() {
               theme: document.getElementById('codeThemeSelect').value,
               fontSize: document.getElementById('codeFontSizeSelect').value,
               fontFamily: document.getElementById('codeFontFamilySelect').value,
+              indentStyle: document.getElementById('codeIndentSelect').value,
               bgColor: document.getElementById('cBgColor').value,
               textColor: document.getElementById('cTextColor').value,
               borderColor: document.getElementById('cBorderColor').value,
@@ -1558,6 +2081,54 @@ function getSidebarHtml() {
                 setCodeStatus('Error: ' + err, 'error');
               })
               .formatSelectedCodeBlock(getCodeOptions());
+          }
+
+          function runIndentAllCode() {
+            setCodeStatus('Indenting all code blocks...', 'loading');
+            document.getElementById('btnIndentAllCode').disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                document.getElementById('btnIndentAllCode').disabled = false;
+                setCodeStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('btnIndentAllCode').disabled = false;
+                setCodeStatus('Error: ' + err, 'error');
+              })
+              .indentAllCodeBlocks(getCodeOptions());
+          }
+
+          function runUndoAllCode() {
+            if (!confirm('Are you sure you want to revert all code blocks to plain document text?')) {
+              return;
+            }
+            setCodeStatus('Reverting all code blocks...', 'loading');
+            document.getElementById('btnUndoAllCode').disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                document.getElementById('btnUndoAllCode').disabled = false;
+                setCodeStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('btnUndoAllCode').disabled = false;
+                setCodeStatus('Error: ' + err, 'error');
+              })
+              .undoAllCodeBlocksFormatting();
+          }
+
+          function runUndoSelectedCode() {
+            setCodeStatus('Reverting selected code block...', 'loading');
+            document.getElementById('btnUndoSelectedCode').disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                document.getElementById('btnUndoSelectedCode').disabled = false;
+                setCodeStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('btnUndoSelectedCode').disabled = false;
+                setCodeStatus('Error: ' + err, 'error');
+              })
+              .undoSelectedCodeBlockFormatting();
           }
 
           // Initialize previews on load

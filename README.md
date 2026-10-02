@@ -28,17 +28,23 @@
   - **Table Element**: Centered on page across document margins.
   - Refined cell padding (Compact, Normal, Relaxed) and soft borders.
 - **🛡️ Code Block Safety**: Automatically differentiates between regular data tables and code containers, keeping your syntax highlighting intact while centering both!
+- **↩ 1-Click Table Formatting Undo**: Reset all tables (or the selected table) back to clean standard document defaults (white backgrounds, 1pt black borders, left alignment, default font) with one click.
 
 ---
 
-### ⚡ Smart Code Highlighter
+### ⚡ Smart Code Highlighter & Indentation
 - **⚡ 1-Click Formatting**: Formats every code block in your entire document in one click.
+- **📐 Smart Code Indentation Engine**:
+  - **Smart Auto-Indent (2 or 4 spaces)**: Syntax-aware indentation that automatically calculates brace nesting, function blocks, loops, and tags.
+  - **Tab Normalization**: Converts hard tabs into clean 2-space or 4-space indentations and normalizes irregular spacing.
+  - **Dedicated Indent Action**: Re-indent all existing code blocks or selected blocks directly from the sidebar or menu.
+- **↩ 1-Click Code Blocks Formatting Undo**: Safely unwraps 1x1 code block tables back into standard document paragraphs, removing background shading and syntax colors while preserving your code text.
 - **🔒 Curly Brace Tracking Engine**: Uses net `{` and `}` balance counting to guarantee functions, loops, and nested classes never get split into fragmented chunks, even across multiple blank lines.
 - **🚫 No Markdown Required**: You don't need to wrap code in triple backticks (\`\`\`). Simply paste your code anywhere in the document.
 - **🎨 Interactive Sidebar Themes**: GitHub Light, Dracula Dark, Monokai Dark, Solarized Light, or Custom.
 - **🔤 Expanded Monospace Fonts**: Consolas, Roboto Mono, Courier New, Inconsolata, Source Code Pro, Space Mono, PT Mono, and Ubuntu Mono with font sizes from 8.5pt to 12pt.
 - **🧠 Prose Rejection Heuristics**: Distinguishes between actual code lines and natural conversational English sentences so regular text is never converted.
-- **💾 Auto-Saved Preferences**: Automatically remembers your chosen fonts, colors, padding, and font sizes for future sessions.
+- **💾 Auto-Saved Preferences**: Automatically remembers your chosen fonts, colors, padding, indentation, and font sizes for future sessions.
 
 ---
 
@@ -79,11 +85,17 @@ clasp push
 ### 3. Open the Interactive Sidebar
 - Click **⚡ Code & Table Tools** > **Open Sidebar (Styles & Colors)**.
 - Switch between **📊 Tables** and **⚡ Code Blocks** tabs:
-  - **Tables Tab**: Choose your color theme (Corporate Navy, Emerald Mint, Royal Indigo, etc.), cell alignment, and padding with a real-time live table preview.
-  - **Code Tab**: Pick syntax themes (GitHub Light, Dracula, Monokai), font size, and live code preview.
+  - **Tables Tab**: Choose your color theme (Corporate Navy, Emerald Mint, Royal Indigo, etc.), cell alignment, and padding with a real-time live table preview. Includes **↩ Undo All Tables Formatting** and **Undo Selected Table Only**.
+  - **Code Tab**: Pick syntax themes (GitHub Light, Dracula, Monokai), monospace font, and **Code Indentation** (Smart 2-Space, 4-Space, or Tab conversion). Includes **📐 Auto-Indent All Code Blocks**, **↩ Undo All Code Blocks Formatting**, and **Undo Selected Code Block**.
 
-### 4. Highlight Code Blocks
+### 4. Highlight & Indent Code Blocks
 - Click **⚡ Code & Table Tools** > **⚡ Highlight All Code (Quick Run)**, or select code and click **Highlight Selected Code**.
+- Code blocks are automatically indented according to your chosen indentation preference.
+- Use **📐 Auto-Indent All Code Blocks** to re-indent existing blocks anytime.
+
+### 5. Undo Formatting Anytime
+- Click **↩ Undo All Tables Formatting** to revert tables back to standard document defaults.
+- Click **↩ Undo All Code Blocks Formatting** to convert 1x1 code block containers back to normal paragraphs.
 
 ---
 

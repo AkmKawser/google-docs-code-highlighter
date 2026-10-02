@@ -1,6 +1,6 @@
-# ⚡ Google Docs Code Highlighter & Table Formatter
+# ⚡ Google Docs Code, Table & Typography Suite
 
-> A smart Google Apps Script tool that automatically highlights code blocks, formats tables with professional colorful themes & zebra striping, and aligns everything in the middle of your Google Docs — with a dual-tab sidebar and zero markdown backticks required.
+> A smart Google Apps Script suite that formats document typography (Title, Heading 1, Sub-headings, Body), highlights code blocks with auto-indentation, and styles data tables with professional themes & zebra striping — with an interactive 3-tab sidebar and zero markdown backticks required.
 
 ![Google Apps Script](https://img.shields.io/badge/Google%20Apps%20Script-4285F4?style=for-the-badge&logo=google&logoColor=white)
 ![Google Docs](https://img.shields.io/badge/Google%20Docs-0F9D58?style=for-the-badge&logo=googledocs&logoColor=white)
@@ -9,6 +9,35 @@
 ---
 
 ## ✨ Features
+
+### ✍️ Document Typography & Heading Formatter
+- **📖 Document Title Formatting (`TITLE`)**:
+  - Independent typography controls: Font family, size (18–36pt), bold, text alignment (Center, Left, Right).
+  - **Full Color Picking**: Individual pickers for text color and background color.
+  - **Background Style Switch**: Switch between **Full-Width Header Banner** (seamless edge-to-edge block) or **Inline Text Highlight**.
+  - Background enable/disable toggle.
+- **📌 Main Headings Formatting (`HEADING_1`)**:
+  - Font family, font size (14–24pt), bold, alignment.
+  - Heading text color picker and background color picker.
+  - Full-width colored banner table or inline highlight with toggle.
+- **📑 Sub-Headings Formatting (`HEADING_2`, `HEADING_3`, `SUBTITLE`)**:
+  - Font family, font size (10–20pt), bold, alignment.
+  - Sub-heading text color picker and background color picker.
+  - Full-width banner or inline highlight with toggle.
+- **📝 General Body Text Formatting (`NORMAL`)**:
+  - Pure font-changing controls without clutter: Font family, font size (8–20pt), text color, and alignment (Left, Justify, Center, Right).
+  - **"Apply to General Body Text" Toggle**: Allows formatting headings only, or both headings and body text together.
+- **🎨 Interactive Typography Presets**:
+  - **Executive Navy**: Montserrat headers & Roboto body with royal navy banners.
+  - **Modern Tech**: Inter clean typography with indigo banners.
+  - **Emerald Forest**: Montserrat headers with fresh forest green banners.
+  - **Editorial Classic**: Georgia serif styling with refined slate highlights.
+  - **Crimson Luxe**: Montserrat headers with rich ruby banners.
+  - **Custom Configuration**: Full granular control over every font, color, and size.
+- **👁️ Live Interactive Typography Preview**: Shows real-time updates for Title, Heading 1, Sub-headings, and body paragraphs as you adjust fonts and colors.
+- **↩ 1-Click Document Typography Undo**: Reverts all headings, titles, and body paragraphs back to Google Docs defaults and unrolls header banners cleanly back into normal paragraphs.
+
+---
 
 ### 📊 Professional Table Formatter & Middle-of-Page Alignment
 - **📐 Automatic Middle Alignment**: Calculates page width and margins (`pageWidth - marginLeft - marginRight`) to center-align all tables symmetrically across the printable page with proportional column sizing.
@@ -74,26 +103,28 @@ clasp push
 
 ## 📖 How to Use
 
-### 1. Format & Center All Tables
-- Click **⚡ Code & Table Tools** > **📊 Format & Center All Tables**.
+### 1. Format Document Typography
+- Click **⚡ Code, Table & Typography Suite** > **✍️ Format Document Typography**.
+- Your document Title, Heading 1s, Sub-headings (H2, H3, Subtitle), and body paragraphs will be styled with your chosen theme, fonts, colors, and background banners.
+- Or highlight any passage and click **✍️ Format Selected Text Only**.
+
+### 2. Format & Center All Tables
+- Click **⚡ Code, Table & Typography Suite** > **📊 Format & Center All Tables**.
 - All data tables will instantly be aligned in the middle of the page and styled with colorful headers, zebra striping, and clean borders.
 
-### 2. Format a Selected Table Only
-- Place your cursor inside any table in your document.
-- Click **⚡ Code & Table Tools** > **📊 Format Selected Table**.
-
-### 3. Open the Interactive Sidebar
-- Click **⚡ Code & Table Tools** > **Open Sidebar (Styles & Colors)**.
-- Switch between **📊 Tables** and **⚡ Code Blocks** tabs:
+### 3. Open the Interactive 3-Tab Sidebar
+- Click **⚡ Code, Table & Typography Suite** > **Open Sidebar (Styles & Colors)**.
+- Switch between **✍️ Typography**, **📊 Tables**, and **⚡ Code** tabs:
+  - **Typography Tab**: Select a preset (Executive Navy, Modern Tech, etc.) or customize title/heading/subheading colors, fonts, sizes, and banner styles with a live document preview.
   - **Tables Tab**: Choose your color theme (Corporate Navy, Emerald Mint, Royal Indigo, etc.), cell alignment, and padding with a real-time live table preview. Includes **↩ Undo All Tables Formatting** and **Undo Selected Table Only**.
   - **Code Tab**: Pick syntax themes (GitHub Light, Dracula, Monokai), monospace font, and **Code Indentation** (Smart 2-Space, 4-Space, or Tab conversion). Includes **📐 Auto-Indent All Code Blocks**, **↩ Undo All Code Blocks Formatting**, and **Undo Selected Code Block**.
 
 ### 4. Highlight & Indent Code Blocks
-- Click **⚡ Code & Table Tools** > **⚡ Highlight All Code (Quick Run)**, or select code and click **Highlight Selected Code**.
+- Click **⚡ Code, Table & Typography Suite** > **⚡ Highlight All Code (Quick Run)**, or select code and click **Highlight Selected Code**.
 - Code blocks are automatically indented according to your chosen indentation preference.
-- Use **📐 Auto-Indent All Code Blocks** to re-indent existing blocks anytime.
 
 ### 5. Undo Formatting Anytime
+- Click **↩ Undo Document Text Formatting** to revert titles, headings, and body paragraphs back to clean Google Docs defaults and unroll banner tables.
 - Click **↩ Undo All Tables Formatting** to revert tables back to standard document defaults.
 - Click **↩ Undo All Code Blocks Formatting** to convert 1x1 code block containers back to normal paragraphs.
 

@@ -7,8 +7,12 @@
 
 function onOpen() {
   DocumentApp.getUi()
-    .createMenu('⚡ Code & Table Tools')
+    .createMenu('⚡ Code, Table & Typography Suite')
     .addItem('Open Sidebar (Styles & Colors)', 'showSidebar')
+    .addSeparator()
+    .addItem('✍️ Format Document Typography', 'quickFormatDocumentTypography')
+    .addItem('✍️ Format Selected Text Only', 'quickFormatSelectedTypography')
+    .addItem('↩ Undo Document Text Formatting', 'quickUndoDocumentTypography')
     .addSeparator()
     .addItem('📊 Format & Center All Tables', 'quickFormatAllTables')
     .addItem('📊 Format Selected Table', 'quickFormatSelectedTable')
@@ -81,9 +85,14 @@ function formatAllDocumentTables(options) {
   for (let i = 0; i < tables.length; i++) {
     const table = tables[i];
     
-    // Check if this table is a 1x1 code block
+    // Check if this table is a 1x1 code block or heading banner
     if (isCodeBlockTable(table)) {
       // Center code block table to page width without overriding syntax styles
+      centerTableOnPage(table, body);
+      continue;
+    }
+    if (isHeadingBannerTable(table)) {
+      // Center heading banner table to page width without overriding typography styles
       centerTableOnPage(table, body);
       continue;
     }
@@ -174,7 +183,7 @@ function undoAllTableFormatting() {
   let count = 0;
   for (let i = 0; i < tables.length; i++) {
     const table = tables[i];
-    if (isCodeBlockTable(table)) continue;
+    if (isCodeBlockTable(table) || isHeadingBannerTable(table)) continue;
     undoSingleTableFormatting(table);
     count++;
   }
@@ -198,6 +207,9 @@ function undoSelectedTableFormatting() {
   }
   if (isCodeBlockTable(table)) {
     return { success: false, message: 'The selected table is a code block. Use the Code Blocks tab to undo it.' };
+  }
+  if (isHeadingBannerTable(table)) {
+    return { success: false, message: 'The selected table is a heading banner. Use the Document Text & Headings tab to undo it.' };
   }
 
   undoSingleTableFormatting(table);
@@ -285,6 +297,29 @@ function isCodeBlockTable(table) {
         )) {
           return true;
         }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Detects whether a table is a 1x1 heading banner container
+ */
+function isHeadingBannerTable(table) {
+  if (table.getNumRows() !== 1) return false;
+  const row = table.getRow(0);
+  if (row.getNumCells() !== 1) return false;
+  if (isCodeBlockTable(table)) return false;
+
+  const cell = row.getCell(0);
+  const numChildren = cell.getNumChildren();
+  for (let i = 0; i < numChildren; i++) {
+    const child = cell.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const heading = child.asParagraph().getHeading();
+      if (heading && heading !== DocumentApp.ParagraphHeading.NORMAL) {
+        return true;
       }
     }
   }
@@ -1188,12 +1223,481 @@ function getUserPreferences() {
 }
 
 /* ==========================================================================
+   DOCUMENT TYPOGRAPHY & HEADING FORMATTING ENGINE
+   ========================================================================== */
+
+/**
+ * Quick action to format document typography from the menu
+ */
+function quickFormatDocumentTypography() {
+  const prefs = getTypographyPreferences();
+  const result = formatDocumentTypography(prefs);
+  DocumentApp.getUi().alert('✍️ Typography Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Quick action to format selected text/heading typography from the menu
+ */
+function quickFormatSelectedTypography() {
+  const prefs = getTypographyPreferences();
+  const result = formatSelectedTypography(prefs);
+  DocumentApp.getUi().alert('✍️ Typography Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Quick action to undo typography formatting from the menu
+ */
+function quickUndoDocumentTypography() {
+  const result = undoDocumentTypography();
+  DocumentApp.getUi().alert('✍️ Typography Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Formats all headings and optionally body text according to typography options
+ */
+function formatDocumentTypography(options) {
+  options = options || getTypographyPreferences();
+  saveTypographyPreferences(options);
+
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+
+  // First unroll any existing heading banner tables so headings are standard body paragraphs
+  unrollHeadingBannerTables(body);
+
+  let titleCount = 0;
+  let h1Count = 0;
+  let subCount = 0;
+  let bodyCount = 0;
+
+  // Collect candidate paragraphs from body
+  const numChildren = body.getNumChildren();
+  const paragraphs = [];
+  for (let i = 0; i < numChildren; i++) {
+    const child = body.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      paragraphs.push(child.asParagraph());
+    }
+  }
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i];
+    if (!p.getParent()) continue;
+
+    const heading = p.getHeading();
+
+    if (heading === DocumentApp.ParagraphHeading.TITLE) {
+      formatSingleHeading(body, p, options.title);
+      titleCount++;
+    } else if (heading === DocumentApp.ParagraphHeading.HEADING_1) {
+      formatSingleHeading(body, p, options.heading1);
+      h1Count++;
+    } else if (
+      heading === DocumentApp.ParagraphHeading.HEADING_2 ||
+      heading === DocumentApp.ParagraphHeading.HEADING_3 ||
+      heading === DocumentApp.ParagraphHeading.SUBTITLE ||
+      heading === DocumentApp.ParagraphHeading.HEADING_4 ||
+      heading === DocumentApp.ParagraphHeading.HEADING_5 ||
+      heading === DocumentApp.ParagraphHeading.HEADING_6
+    ) {
+      formatSingleHeading(body, p, options.subHeading);
+      subCount++;
+    } else if (heading === DocumentApp.ParagraphHeading.NORMAL) {
+      if (options.body && options.body.applyToBody) {
+        if (p.getText().trim().length > 0) {
+          formatSingleBodyParagraph(p, options.body);
+          bodyCount++;
+        }
+      }
+    }
+  }
+
+  const parts = [];
+  if (titleCount > 0) parts.push(titleCount + ' title');
+  if (h1Count > 0) parts.push(h1Count + ' main heading(s)');
+  if (subCount > 0) parts.push(subCount + ' sub-heading(s)');
+  if (bodyCount > 0) parts.push(bodyCount + ' body paragraph(s)');
+
+  return {
+    success: true,
+    count: titleCount + h1Count + subCount + bodyCount,
+    message: parts.length > 0
+      ? 'Formatted ' + parts.join(', ') + ' successfully!'
+      : 'No matching headings or body paragraphs found to format.'
+  };
+}
+
+/**
+ * Formats the selected text or paragraph
+ */
+function formatSelectedTypography(options) {
+  options = options || getTypographyPreferences();
+  saveTypographyPreferences(options);
+
+  const doc = DocumentApp.getActiveDocument();
+  const selection = doc.getSelection();
+  if (!selection) {
+    return {
+      success: false,
+      message: 'Please highlight or select text in your document first.'
+    };
+  }
+
+  const elements = selection.getSelectedElements();
+  let count = 0;
+
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    let p = null;
+    if (el.getElement().getType() === DocumentApp.ElementType.PARAGRAPH) {
+      p = el.getElement().asParagraph();
+    } else if (el.getElement().getType() === DocumentApp.ElementType.TEXT) {
+      const parent = el.getElement().getParent();
+      if (parent.getType() === DocumentApp.ElementType.PARAGRAPH) {
+        p = parent.asParagraph();
+      }
+    }
+
+    if (!p) continue;
+
+    const heading = p.getHeading();
+    if (heading === DocumentApp.ParagraphHeading.TITLE) {
+      applyHeadingStyles(p, options.title, options.title.bgEnabled && options.title.bgStyle === 'inline' ? options.title.bgColor : null);
+      count++;
+    } else if (heading === DocumentApp.ParagraphHeading.HEADING_1) {
+      applyHeadingStyles(p, options.heading1, options.heading1.bgEnabled && options.heading1.bgStyle === 'inline' ? options.heading1.bgColor : null);
+      count++;
+    } else if (
+      heading === DocumentApp.ParagraphHeading.HEADING_2 ||
+      heading === DocumentApp.ParagraphHeading.HEADING_3 ||
+      heading === DocumentApp.ParagraphHeading.SUBTITLE ||
+      heading === DocumentApp.ParagraphHeading.HEADING_4 ||
+      heading === DocumentApp.ParagraphHeading.HEADING_5 ||
+      heading === DocumentApp.ParagraphHeading.HEADING_6
+    ) {
+      applyHeadingStyles(p, options.subHeading, options.subHeading.bgEnabled && options.subHeading.bgStyle === 'inline' ? options.subHeading.bgColor : null);
+      count++;
+    } else {
+      if (options.body && options.body.applyToBody) {
+        formatSingleBodyParagraph(p, options.body);
+        count++;
+      }
+    }
+  }
+
+  return {
+    success: true,
+    count: count,
+    message: count > 0
+      ? 'Formatted ' + count + ' selected element(s) successfully!'
+      : 'No text was formatted. If formatting body text, ensure "Apply to General Body Text" is checked.'
+  };
+}
+
+/**
+ * Formats a single heading paragraph, handling background banner vs inline highlight
+ */
+function formatSingleHeading(body, p, config) {
+  if (!config) return;
+
+  const bgEnabled = !!config.bgEnabled;
+  const bgStyle = config.bgStyle || 'banner';
+  const bgColor = config.bgColor || '#EFF6FF';
+
+  let targetPara = p;
+
+  if (bgEnabled && bgStyle === 'banner') {
+    targetPara = wrapParagraphInBanner(body, p, bgColor);
+  }
+
+  applyHeadingStyles(targetPara, config, bgEnabled && bgStyle === 'inline' ? bgColor : null);
+}
+
+/**
+ * Wraps a paragraph into a full-width borderless 1x1 table banner
+ */
+function wrapParagraphInBanner(body, p, bgColor) {
+  const parent = p.getParent();
+  if (parent.getType() !== DocumentApp.ElementType.BODY_SECTION) {
+    return p;
+  }
+
+  const childIndex = body.getChildIndex(p);
+  const headingType = p.getHeading();
+  const text = p.getText();
+
+  const table = body.insertTable(childIndex, [[ '' ]]);
+  table.setBorderWidth(0);
+  table.setBorderColor(bgColor);
+
+  const cell = table.getRow(0).getCell(0);
+  cell.setBackgroundColor(bgColor);
+  cell.setPaddingTop(8);
+  cell.setPaddingBottom(8);
+  cell.setPaddingLeft(12);
+  cell.setPaddingRight(12);
+  cell.setVerticalAlignment(DocumentApp.VerticalAlignment.TOP);
+
+  const cellPara = cell.getChild(0).asParagraph();
+  cellPara.setHeading(headingType);
+  cellPara.setText(text);
+
+  centerTableOnPage(table, body);
+
+  p.removeFromParent();
+  return cellPara;
+}
+
+/**
+ * Applies font, size, bold, color, and alignment styles to a heading paragraph
+ */
+function applyHeadingStyles(para, config, inlineBgColor) {
+  if (!para) return;
+
+  let align = DocumentApp.HorizontalAlignment.LEFT;
+  if (config.alignment === 'CENTER') align = DocumentApp.HorizontalAlignment.CENTER;
+  if (config.alignment === 'RIGHT') align = DocumentApp.HorizontalAlignment.RIGHT;
+  if (config.alignment === 'JUSTIFY') align = DocumentApp.HorizontalAlignment.JUSTIFY;
+  para.setAlignment(align);
+
+  const fontSize = Number(config.fontSize) || 16;
+  const fontFamily = config.fontFamily || 'Arial';
+  const textColor = config.textColor || '#000000';
+  const bold = config.bold !== undefined ? config.bold : true;
+
+  try { para.setFontFamily(fontFamily); } catch(e) {}
+  try { para.setFontSize(fontSize); } catch(e) {}
+  para.setLineSpacing(1.15);
+
+  const textObj = para.editAsText();
+  if (textObj.getText().length > 0) {
+    try { textObj.setFontFamily(fontFamily); } catch(e) {}
+    try { textObj.setFontSize(fontSize); } catch(e) {}
+    try { textObj.setBold(bold); } catch(e) {}
+    try { textObj.setForegroundColor(textColor); } catch(e) {}
+    try { textObj.setBackgroundColor(inlineBgColor || null); } catch(e) {}
+  }
+}
+
+/**
+ * Applies typography options to a normal body paragraph
+ */
+function formatSingleBodyParagraph(para, config) {
+  if (!para) return;
+
+  let align = DocumentApp.HorizontalAlignment.LEFT;
+  if (config.alignment === 'CENTER') align = DocumentApp.HorizontalAlignment.CENTER;
+  if (config.alignment === 'RIGHT') align = DocumentApp.HorizontalAlignment.RIGHT;
+  if (config.alignment === 'JUSTIFY') align = DocumentApp.HorizontalAlignment.JUSTIFY;
+  para.setAlignment(align);
+
+  const fontSize = Number(config.fontSize) || 11;
+  const fontFamily = config.fontFamily || 'Arial';
+  const textColor = config.textColor || '#1F2937';
+
+  try { para.setFontFamily(fontFamily); } catch(e) {}
+  try { para.setFontSize(fontSize); } catch(e) {}
+  para.setLineSpacing(1.15);
+
+  const textObj = para.editAsText();
+  if (textObj.getText().length > 0) {
+    try { textObj.setFontFamily(fontFamily); } catch(e) {}
+    try { textObj.setFontSize(fontSize); } catch(e) {}
+    try { textObj.setBold(false); } catch(e) {}
+    try { textObj.setForegroundColor(textColor); } catch(e) {}
+    try { textObj.setBackgroundColor(null); } catch(e) {}
+  }
+}
+
+/**
+ * Unrolls any 1x1 heading banner tables back into standard body paragraphs
+ */
+function unrollHeadingBannerTables(body) {
+  const tables = body.getTables();
+  if (!tables || tables.length === 0) return 0;
+
+  let unrolled = 0;
+  for (let i = tables.length - 1; i >= 0; i--) {
+    const table = tables[i];
+    if (isHeadingBannerTable(table)) {
+      unrollSingleHeadingBanner(body, table);
+      unrolled++;
+    }
+  }
+  return unrolled;
+}
+
+/**
+ * Extracts paragraphs from a heading banner table into body and removes the table
+ */
+function unrollSingleHeadingBanner(body, table) {
+  const insertIndex = body.getChildIndex(table);
+  const cell = table.getRow(0).getCell(0);
+  const numChildren = cell.getNumChildren();
+  const createdParas = [];
+
+  for (let i = 0; i < numChildren; i++) {
+    const child = cell.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const p = child.asParagraph();
+      const text = p.getText();
+      const heading = p.getHeading();
+      if (i === 0 && text === '' && numChildren > 1) continue;
+      const newP = body.insertParagraph(insertIndex + createdParas.length, text);
+      newP.setHeading(heading);
+      createdParas.push(newP);
+    }
+  }
+
+  if (createdParas.length === 0) {
+    createdParas.push(body.insertParagraph(insertIndex, ''));
+  }
+
+  table.removeFromParent();
+  return createdParas;
+}
+
+/**
+ * Resets all document headings and body text back to standard Google Docs defaults
+ */
+function undoDocumentTypography() {
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+
+  unrollHeadingBannerTables(body);
+
+  const numChildren = body.getNumChildren();
+  let count = 0;
+
+  for (let i = 0; i < numChildren; i++) {
+    const child = body.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const p = child.asParagraph();
+      const heading = p.getHeading();
+
+      let defaultFont = 'Arial';
+      let defaultSize = 11;
+      let defaultBold = false;
+      let defaultColor = '#000000';
+
+      if (heading === DocumentApp.ParagraphHeading.TITLE) {
+        defaultSize = 26;
+        defaultBold = true;
+      } else if (heading === DocumentApp.ParagraphHeading.HEADING_1) {
+        defaultSize = 20;
+        defaultBold = true;
+      } else if (heading === DocumentApp.ParagraphHeading.HEADING_2) {
+        defaultSize = 16;
+        defaultBold = true;
+      } else if (heading === DocumentApp.ParagraphHeading.HEADING_3) {
+        defaultSize = 14;
+        defaultBold = true;
+        defaultColor = '#434343';
+      } else if (heading === DocumentApp.ParagraphHeading.SUBTITLE) {
+        defaultSize = 15;
+        defaultColor = '#666666';
+      } else if (heading !== DocumentApp.ParagraphHeading.NORMAL) {
+        defaultSize = 13;
+        defaultBold = true;
+      }
+
+      p.setAlignment(DocumentApp.HorizontalAlignment.LEFT);
+      try { p.setFontFamily(defaultFont); } catch(e) {}
+      try { p.setFontSize(defaultSize); } catch(e) {}
+      p.setLineSpacing(1.15);
+
+      const textObj = p.editAsText();
+      if (textObj.getText().length > 0) {
+        try { textObj.setFontFamily(defaultFont); } catch(e) {}
+        try { textObj.setFontSize(defaultSize); } catch(e) {}
+        try { textObj.setBold(defaultBold); } catch(e) {}
+        try { textObj.setForegroundColor(defaultColor); } catch(e) {}
+        try { textObj.setBackgroundColor(null); } catch(e) {}
+      }
+      count++;
+    }
+  }
+
+  return {
+    success: true,
+    count: count,
+    message: 'Reset typography for ' + count + ' paragraph(s) and headings back to document defaults.'
+  };
+}
+
+/**
+ * Retrieves typography preferences with defaults
+ */
+function getTypographyPreferences() {
+  const defaults = {
+    preset: 'executive-navy',
+    title: {
+      fontFamily: 'Montserrat',
+      fontSize: 26,
+      textColor: '#1E3A8A',
+      alignment: 'CENTER',
+      bold: true,
+      bgEnabled: false,
+      bgColor: '#EFF6FF',
+      bgStyle: 'banner'
+    },
+    heading1: {
+      fontFamily: 'Montserrat',
+      fontSize: 18,
+      textColor: '#1E3A8A',
+      alignment: 'LEFT',
+      bold: true,
+      bgEnabled: true,
+      bgColor: '#EFF6FF',
+      bgStyle: 'banner'
+    },
+    subHeading: {
+      fontFamily: 'Montserrat',
+      fontSize: 14,
+      textColor: '#2563EB',
+      alignment: 'LEFT',
+      bold: true,
+      bgEnabled: false,
+      bgColor: '#F1F5F9',
+      bgStyle: 'inline'
+    },
+    body: {
+      applyToBody: true,
+      fontFamily: 'Roboto',
+      fontSize: 11,
+      textColor: '#1F2937',
+      alignment: 'LEFT'
+    }
+  };
+
+  try {
+    const raw = PropertiesService.getUserProperties().getProperty('DOCUMENT_TYPOGRAPHY_PREFS');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return Object.assign({}, defaults, parsed);
+    }
+  } catch (e) {}
+
+  return defaults;
+}
+
+/**
+ * Persists typography preferences to user properties
+ */
+function saveTypographyPreferences(options) {
+  try {
+    PropertiesService.getUserProperties().setProperty('DOCUMENT_TYPOGRAPHY_PREFS', JSON.stringify(options));
+  } catch (e) {}
+}
+
+/* ==========================================================================
    SIDEBAR UI (TABBED: 📊 TABLES & ⚡ CODE)
    ========================================================================== */
 
 function getSidebarHtml() {
   const codePrefs = getUserPreferences();
   const tablePrefs = getTablePreferences();
+  const typoPrefs = getTypographyPreferences();
 
   return `
     <!DOCTYPE html>
@@ -1202,7 +1706,7 @@ function getSidebarHtml() {
         <base target="_top">
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600;700&family=Roboto+Mono:wght@400;700&family=Roboto:wght@400;500;700&family=Source+Code+Pro:wght@400;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&family=Merriweather:wght@400;700&family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600;700&family=Roboto+Mono:wght@400;700&family=Roboto:wght@400;500;700&family=Source+Code+Pro:wght@400;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
         <style>
           * { box-sizing: border-box; }
           body {
@@ -1221,14 +1725,14 @@ function getSidebarHtml() {
             border-radius: 8px;
             padding: 3px;
             margin-bottom: 14px;
-            gap: 4px;
+            gap: 3px;
           }
           .tab-btn {
             flex: 1;
             border: none;
             background: transparent;
-            padding: 8px 4px;
-            font-size: 12px;
+            padding: 7px 2px;
+            font-size: 11px;
             font-weight: 600;
             color: #6b7280;
             border-radius: 6px;
@@ -1237,7 +1741,8 @@ function getSidebarHtml() {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 5px;
+            gap: 4px;
+            white-space: nowrap;
           }
           .tab-btn.active {
             background: #ffffff;
@@ -1247,6 +1752,43 @@ function getSidebarHtml() {
           
           .tab-content { display: none; }
           .tab-content.active { display: block; }
+
+          /* Typography Card Component */
+          .typo-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 9px 10px;
+            margin-bottom: 10px;
+          }
+          .typo-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+          }
+          .typo-card-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: #334155;
+          }
+          .row-2col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 6px;
+          }
+          .checkbox-label {
+            font-size: 11px;
+            font-weight: 500;
+            color: #475569;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+          }
 
           /* Form Controls */
           .section-title {
@@ -1465,7 +2007,10 @@ function getSidebarHtml() {
 
         <!-- Navigation Tabs -->
         <div class="tab-header">
-          <button class="tab-btn active" id="tabBtnTables" onclick="switchTab('tables')">
+          <button class="tab-btn active" id="tabBtnTypography" onclick="switchTab('typography')">
+            <span>✍️</span> Typography
+          </button>
+          <button class="tab-btn" id="tabBtnTables" onclick="switchTab('tables')">
             <span>📊</span> Tables
           </button>
           <button class="tab-btn" id="tabBtnCode" onclick="switchTab('code')">
@@ -1474,9 +2019,338 @@ function getSidebarHtml() {
         </div>
 
         <!-- ==========================================
-             TAB 1: 📊 PROFESSIONAL TABLE FORMATTER
+             TAB 1: ✍️ DOCUMENT TYPOGRAPHY & HEADINGS
              ========================================== -->
-        <div id="tabContentTables" class="tab-content active">
+        <div id="tabContentTypography" class="tab-content active">
+          <div class="info-badge">
+            ✓ <strong>Title &amp; Headings:</strong> Full color picking, fonts &amp; sizes<br>
+            ✓ <strong>Background Styles:</strong> Full-width header banner or inline text highlight<br>
+            ✓ <strong>Body Text:</strong> Font changing, size up to 20pt, color &amp; alignment
+          </div>
+
+          <div class="control-group">
+            <label>Typography Preset</label>
+            <select id="typoPresetSelect" onchange="onTypographyPresetChange()">
+              <option value="executive-navy" selected>Executive Navy (Montserrat &amp; Roboto)</option>
+              <option value="modern-tech">Modern Tech (Inter Clean)</option>
+              <option value="emerald-forest">Emerald Forest (Montserrat &amp; Slate)</option>
+              <option value="editorial-classic">Editorial Classic (Georgia Serif)</option>
+              <option value="crimson-luxe">Crimson Luxe (Ruby &amp; Slate)</option>
+              <option value="custom">Custom Typography Palette...</option>
+            </select>
+          </div>
+
+          <!-- Document Title Card -->
+          <div class="typo-card">
+            <div class="typo-card-header">
+              <span class="typo-card-title">📖 Document Title (TITLE)</span>
+              <label class="checkbox-label"><input type="checkbox" id="typoTitleBgToggle" onchange="updateTypographyPreview()"> Add Background</label>
+            </div>
+            <div class="row-2col">
+              <div>
+                <label>Font</label>
+                <select id="typoTitleFontSelect" onchange="updateTypographyPreview()">
+                  <option value="Montserrat" selected>Montserrat</option>
+                  <option value="Inter">Inter</option>
+                  <option value="Roboto">Roboto</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Lato">Lato</option>
+                  <option value="Open Sans">Open Sans</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Merriweather">Merriweather</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                  <option value="Calibri">Calibri</option>
+                  <option value="Trebuchet MS">Trebuchet MS</option>
+                  <option value="JetBrains Mono">JetBrains Mono</option>
+                  <option value="Consolas">Consolas</option>
+                </select>
+              </div>
+              <div>
+                <label>Size</label>
+                <select id="typoTitleSizeSelect" onchange="updateTypographyPreview()">
+                  <option value="18">18 pt</option>
+                  <option value="20">20 pt</option>
+                  <option value="22">22 pt</option>
+                  <option value="24">24 pt</option>
+                  <option value="26" selected>26 pt (Default)</option>
+                  <option value="28">28 pt</option>
+                  <option value="30">30 pt</option>
+                  <option value="32">32 pt</option>
+                  <option value="36">36 pt (Large)</option>
+                </select>
+              </div>
+            </div>
+            <div class="row-2col">
+              <div>
+                <label>Alignment</label>
+                <select id="typoTitleAlignSelect" onchange="updateTypographyPreview()">
+                  <option value="CENTER" selected>Center</option>
+                  <option value="LEFT">Left</option>
+                  <option value="RIGHT">Right</option>
+                </select>
+              </div>
+              <div>
+                <label>Background Style</label>
+                <select id="typoTitleBgStyleSelect" onchange="updateTypographyPreview()">
+                  <option value="banner" selected>Full-Width Banner</option>
+                  <option value="inline">Inline Highlight</option>
+                </select>
+              </div>
+            </div>
+            <div class="color-grid" style="margin-bottom:0; padding:6px 8px;">
+              <div class="color-row">
+                <label>Title Text Color:</label>
+                <input type="color" id="typoTitleColor" value="#1E3A8A" onchange="setTypoCustomMode()">
+              </div>
+              <div class="color-row">
+                <label>Background Color:</label>
+                <input type="color" id="typoTitleBgColor" value="#EFF6FF" onchange="setTypoCustomMode()">
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Heading 1 Card -->
+          <div class="typo-card">
+            <div class="typo-card-header">
+              <span class="typo-card-title">📌 Heading 1 (HEADING_1)</span>
+              <label class="checkbox-label"><input type="checkbox" id="typoH1BgToggle" checked onchange="updateTypographyPreview()"> Add Background</label>
+            </div>
+            <div class="row-2col">
+              <div>
+                <label>Font</label>
+                <select id="typoH1FontSelect" onchange="updateTypographyPreview()">
+                  <option value="Montserrat" selected>Montserrat</option>
+                  <option value="Inter">Inter</option>
+                  <option value="Roboto">Roboto</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Lato">Lato</option>
+                  <option value="Open Sans">Open Sans</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Merriweather">Merriweather</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                  <option value="Calibri">Calibri</option>
+                  <option value="Trebuchet MS">Trebuchet MS</option>
+                  <option value="JetBrains Mono">JetBrains Mono</option>
+                  <option value="Consolas">Consolas</option>
+                </select>
+              </div>
+              <div>
+                <label>Size</label>
+                <select id="typoH1SizeSelect" onchange="updateTypographyPreview()">
+                  <option value="14">14 pt</option>
+                  <option value="15">15 pt</option>
+                  <option value="16">16 pt</option>
+                  <option value="17">17 pt</option>
+                  <option value="18" selected>18 pt (Recommended)</option>
+                  <option value="19">19 pt</option>
+                  <option value="20">20 pt</option>
+                  <option value="22">22 pt</option>
+                  <option value="24">24 pt</option>
+                </select>
+              </div>
+            </div>
+            <div class="row-2col">
+              <div>
+                <label>Alignment</label>
+                <select id="typoH1AlignSelect" onchange="updateTypographyPreview()">
+                  <option value="LEFT" selected>Left</option>
+                  <option value="CENTER">Center</option>
+                  <option value="RIGHT">Right</option>
+                </select>
+              </div>
+              <div>
+                <label>Background Style</label>
+                <select id="typoH1BgStyleSelect" onchange="updateTypographyPreview()">
+                  <option value="banner" selected>Full-Width Banner</option>
+                  <option value="inline">Inline Highlight</option>
+                </select>
+              </div>
+            </div>
+            <div class="color-grid" style="margin-bottom:0; padding:6px 8px;">
+              <div class="color-row">
+                <label>Heading Color:</label>
+                <input type="color" id="typoH1Color" value="#1E3A8A" onchange="setTypoCustomMode()">
+              </div>
+              <div class="color-row">
+                <label>Background Color:</label>
+                <input type="color" id="typoH1BgColor" value="#EFF6FF" onchange="setTypoCustomMode()">
+              </div>
+            </div>
+          </div>
+
+          <!-- Sub-Headings Card -->
+          <div class="typo-card">
+            <div class="typo-card-header">
+              <span class="typo-card-title">📑 Sub-Headings (H2, H3, Subtitle)</span>
+              <label class="checkbox-label"><input type="checkbox" id="typoSubBgToggle" onchange="updateTypographyPreview()"> Add Background</label>
+            </div>
+            <div class="row-2col">
+              <div>
+                <label>Font</label>
+                <select id="typoSubFontSelect" onchange="updateTypographyPreview()">
+                  <option value="Montserrat" selected>Montserrat</option>
+                  <option value="Inter">Inter</option>
+                  <option value="Roboto">Roboto</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Lato">Lato</option>
+                  <option value="Open Sans">Open Sans</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Merriweather">Merriweather</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                  <option value="Calibri">Calibri</option>
+                  <option value="Trebuchet MS">Trebuchet MS</option>
+                  <option value="JetBrains Mono">JetBrains Mono</option>
+                  <option value="Consolas">Consolas</option>
+                </select>
+              </div>
+              <div>
+                <label>Size</label>
+                <select id="typoSubSizeSelect" onchange="updateTypographyPreview()">
+                  <option value="10">10 pt</option>
+                  <option value="11">11 pt</option>
+                  <option value="12">12 pt</option>
+                  <option value="13">13 pt</option>
+                  <option value="14" selected>14 pt (Recommended)</option>
+                  <option value="15">15 pt</option>
+                  <option value="16">16 pt</option>
+                  <option value="17">17 pt</option>
+                  <option value="18">18 pt</option>
+                  <option value="20">20 pt (Large)</option>
+                </select>
+              </div>
+            </div>
+            <div class="row-2col">
+              <div>
+                <label>Alignment</label>
+                <select id="typoSubAlignSelect" onchange="updateTypographyPreview()">
+                  <option value="LEFT" selected>Left</option>
+                  <option value="CENTER">Center</option>
+                  <option value="RIGHT">Right</option>
+                </select>
+              </div>
+              <div>
+                <label>Background Style</label>
+                <select id="typoSubBgStyleSelect" onchange="updateTypographyPreview()">
+                  <option value="inline" selected>Inline Highlight</option>
+                  <option value="banner">Full-Width Banner</option>
+                </select>
+              </div>
+            </div>
+            <div class="color-grid" style="margin-bottom:0; padding:6px 8px;">
+              <div class="color-row">
+                <label>Heading Color:</label>
+                <input type="color" id="typoSubColor" value="#2563EB" onchange="setTypoCustomMode()">
+              </div>
+              <div class="color-row">
+                <label>Background Color:</label>
+                <input type="color" id="typoSubBgColor" value="#F1F5F9" onchange="setTypoCustomMode()">
+              </div>
+            </div>
+          </div>
+
+          <!-- General Body Text Card -->
+          <div class="typo-card">
+            <div class="typo-card-header">
+              <span class="typo-card-title">📝 General Body Text (NORMAL)</span>
+              <label class="checkbox-label"><input type="checkbox" id="typoBodyApplyToggle" checked onchange="updateTypographyPreview()"> Apply to Body</label>
+            </div>
+            <div class="row-2col">
+              <div>
+                <label>Font Family</label>
+                <select id="typoBodyFontSelect" onchange="updateTypographyPreview()">
+                  <option value="Roboto" selected>Roboto (Clean Modern)</option>
+                  <option value="Inter">Inter (Executive)</option>
+                  <option value="Arial">Arial (Standard)</option>
+                  <option value="Lato">Lato (Balanced)</option>
+                  <option value="Open Sans">Open Sans (Readable)</option>
+                  <option value="Montserrat">Montserrat</option>
+                  <option value="Georgia">Georgia (Editorial Serif)</option>
+                  <option value="Merriweather">Merriweather (Classic Serif)</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                  <option value="Calibri">Calibri</option>
+                  <option value="Trebuchet MS">Trebuchet MS</option>
+                  <option value="Consolas">Consolas (Code)</option>
+                  <option value="JetBrains Mono">JetBrains Mono (Code)</option>
+                </select>
+              </div>
+              <div>
+                <label>Font Size</label>
+                <select id="typoBodySizeSelect" onchange="updateTypographyPreview()">
+                  <option value="8">8 pt</option>
+                  <option value="8.5">8.5 pt</option>
+                  <option value="9">9 pt</option>
+                  <option value="9.5">9.5 pt</option>
+                  <option value="10">10 pt</option>
+                  <option value="10.5">10.5 pt</option>
+                  <option value="11" selected>11 pt (Default)</option>
+                  <option value="11.5">11.5 pt</option>
+                  <option value="12">12 pt</option>
+                  <option value="13">13 pt</option>
+                  <option value="14">14 pt</option>
+                  <option value="15">15 pt</option>
+                  <option value="16">16 pt</option>
+                  <option value="17">17 pt</option>
+                  <option value="18">18 pt</option>
+                  <option value="19">19 pt</option>
+                  <option value="20">20 pt (Extra Large)</option>
+                </select>
+              </div>
+            </div>
+            <div class="row-2col">
+              <div>
+                <label>Alignment</label>
+                <select id="typoBodyAlignSelect" onchange="updateTypographyPreview()">
+                  <option value="LEFT" selected>Left</option>
+                  <option value="JUSTIFY">Justify</option>
+                  <option value="CENTER">Center</option>
+                  <option value="RIGHT">Right</option>
+                </select>
+              </div>
+              <div class="color-row" style="margin-top:14px;">
+                <label>Text Color:</label>
+                <input type="color" id="typoBodyColor" value="#1F2937" onchange="setTypoCustomMode()">
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Typography Preview -->
+          <div class="preview-container">
+            <div class="preview-header">
+              <span>LIVE TYPOGRAPHY PREVIEW</span>
+              <span>Document Styles</span>
+            </div>
+            <div class="preview-body" style="background:#ffffff; padding:12px;">
+              <div id="prevTitleBox" style="margin-bottom:8px; transition: all 0.15s;">
+                <span id="prevTitleText">Document Title</span>
+              </div>
+              <div id="prevH1Box" style="margin-bottom:6px; transition: all 0.15s;">
+                <span id="prevH1Text">Heading 1: Executive Overview</span>
+              </div>
+              <div id="prevSubBox" style="margin-bottom:6px; transition: all 0.15s;">
+                <span id="prevSubText">Heading 2: Key Methodology &amp; Details</span>
+              </div>
+              <div id="prevBodyBox" style="margin-bottom:0; line-height: 1.4; transition: all 0.15s;">
+                <span id="prevBodyText">Standard document body text styled with chosen font family, size and color settings.</span>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn-primary" id="btnFormatDocTypo" onclick="runFormatDocumentTypography()">
+            <span>✍️</span> Format Document Typography
+          </button>
+          <button class="btn-secondary" id="btnFormatSelectedTypo" onclick="runFormatSelectedTypography()">
+            Format Selected Text Only
+          </button>
+          <button class="btn-danger" id="btnUndoDocTypo" onclick="runUndoDocumentTypography()">
+            <span>↩</span> Undo Document Text Formatting
+          </button>
+          <div id="typoStatus" class="status-box"></div>
+        </div>
+
+        <!-- ==========================================
+             TAB 2: 📊 PROFESSIONAL TABLE FORMATTER
+             ========================================== -->
+        <div id="tabContentTables" class="tab-content">
           <div class="info-badge">
             ✓ <strong>Header:</strong> Middle-aligned &amp; Larger Bold Font<br>
             ✓ <strong>Table Text:</strong> Left-aligned &amp; Top-aligned (Always on Top)<br>
@@ -1808,10 +2682,347 @@ function getSidebarHtml() {
         <script>
           /* Tab Switching */
           function switchTab(tab) {
+            document.getElementById('tabBtnTypography').classList.toggle('active', tab === 'typography');
             document.getElementById('tabBtnTables').classList.toggle('active', tab === 'tables');
             document.getElementById('tabBtnCode').classList.toggle('active', tab === 'code');
+            document.getElementById('tabContentTypography').classList.toggle('active', tab === 'typography');
             document.getElementById('tabContentTables').classList.toggle('active', tab === 'tables');
             document.getElementById('tabContentCode').classList.toggle('active', tab === 'code');
+          }
+
+          /* =========================================================
+             DOCUMENT TYPOGRAPHY LOGIC
+             ========================================================= */
+          const TYPOGRAPHY_PRESETS = {
+            'executive-navy': {
+              titleFont: 'Montserrat', titleSize: '26', titleColor: '#1E3A8A', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#EFF6FF', titleBgStyle: 'banner',
+              h1Font: 'Montserrat', h1Size: '18', h1Color: '#1E3A8A', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#EFF6FF', h1BgStyle: 'banner',
+              subFont: 'Montserrat', subSize: '14', subColor: '#2563EB', subAlign: 'LEFT', subBgEnabled: false, subBgColor: '#F1F5F9', subBgStyle: 'inline',
+              bodyFont: 'Roboto', bodySize: '11', bodyColor: '#1F2937', bodyAlign: 'LEFT', bodyApply: true
+            },
+            'modern-tech': {
+              titleFont: 'Inter', titleSize: '26', titleColor: '#312E81', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#EEF2FF', titleBgStyle: 'banner',
+              h1Font: 'Inter', h1Size: '18', h1Color: '#4338CA', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#EEF2FF', h1BgStyle: 'banner',
+              subFont: 'Inter', subSize: '14', subColor: '#6366F1', subAlign: 'LEFT', subBgEnabled: true, subBgColor: '#F5F3FF', subBgStyle: 'inline',
+              bodyFont: 'Inter', bodySize: '10.5', bodyColor: '#111827', bodyAlign: 'LEFT', bodyApply: true
+            },
+            'emerald-forest': {
+              titleFont: 'Montserrat', titleSize: '26', titleColor: '#064E3B', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#ECFDF5', titleBgStyle: 'banner',
+              h1Font: 'Montserrat', h1Size: '18', h1Color: '#065F46', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#ECFDF5', h1BgStyle: 'banner',
+              subFont: 'Montserrat', subSize: '14', subColor: '#0D9488', subAlign: 'LEFT', subBgEnabled: false, subBgColor: '#F0FDFA', subBgStyle: 'inline',
+              bodyFont: 'Roboto', bodySize: '11', bodyColor: '#1F2937', bodyAlign: 'LEFT', bodyApply: true
+            },
+            'editorial-classic': {
+              titleFont: 'Georgia', titleSize: '28', titleColor: '#18181B', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#F4F4F5', titleBgStyle: 'inline',
+              h1Font: 'Georgia', h1Size: '18', h1Color: '#27272A', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#F4F4F5', h1BgStyle: 'inline',
+              subFont: 'Georgia', subSize: '14', subColor: '#52525B', subAlign: 'LEFT', subBgEnabled: false, subBgColor: '#F4F4F5', subBgStyle: 'inline',
+              bodyFont: 'Georgia', bodySize: '11', bodyColor: '#27272A', bodyAlign: 'LEFT', bodyApply: true
+            },
+            'crimson-luxe': {
+              titleFont: 'Montserrat', titleSize: '26', titleColor: '#881337', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#FFF1F2', titleBgStyle: 'banner',
+              h1Font: 'Montserrat', h1Size: '18', h1Color: '#9F1239', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#FFF1F2', h1BgStyle: 'banner',
+              subFont: 'Montserrat', subSize: '14', subColor: '#BE123C', subAlign: 'LEFT', subBgEnabled: false, subBgColor: '#FFE4E6', subBgStyle: 'inline',
+              bodyFont: 'Roboto', bodySize: '11', bodyColor: '#1F2937', bodyAlign: 'LEFT', bodyApply: true
+            }
+          };
+
+          const savedTypoPrefs = ${JSON.stringify(typoPrefs)};
+          document.getElementById('typoPresetSelect').value = savedTypoPrefs.preset || 'executive-navy';
+          if (savedTypoPrefs.title) {
+            document.getElementById('typoTitleFontSelect').value = savedTypoPrefs.title.fontFamily || 'Montserrat';
+            document.getElementById('typoTitleSizeSelect').value = savedTypoPrefs.title.fontSize || '26';
+            document.getElementById('typoTitleAlignSelect').value = savedTypoPrefs.title.alignment || 'CENTER';
+            document.getElementById('typoTitleBgToggle').checked = !!savedTypoPrefs.title.bgEnabled;
+            document.getElementById('typoTitleBgStyleSelect').value = savedTypoPrefs.title.bgStyle || 'banner';
+            document.getElementById('typoTitleColor').value = savedTypoPrefs.title.textColor || '#1E3A8A';
+            document.getElementById('typoTitleBgColor').value = savedTypoPrefs.title.bgColor || '#EFF6FF';
+          }
+          if (savedTypoPrefs.heading1) {
+            document.getElementById('typoH1FontSelect').value = savedTypoPrefs.heading1.fontFamily || 'Montserrat';
+            document.getElementById('typoH1SizeSelect').value = savedTypoPrefs.heading1.fontSize || '18';
+            document.getElementById('typoH1AlignSelect').value = savedTypoPrefs.heading1.alignment || 'LEFT';
+            document.getElementById('typoH1BgToggle').checked = savedTypoPrefs.heading1.bgEnabled !== undefined ? savedTypoPrefs.heading1.bgEnabled : true;
+            document.getElementById('typoH1BgStyleSelect').value = savedTypoPrefs.heading1.bgStyle || 'banner';
+            document.getElementById('typoH1Color').value = savedTypoPrefs.heading1.textColor || '#1E3A8A';
+            document.getElementById('typoH1BgColor').value = savedTypoPrefs.heading1.bgColor || '#EFF6FF';
+          }
+          if (savedTypoPrefs.subHeading) {
+            document.getElementById('typoSubFontSelect').value = savedTypoPrefs.subHeading.fontFamily || 'Montserrat';
+            document.getElementById('typoSubSizeSelect').value = savedTypoPrefs.subHeading.fontSize || '14';
+            document.getElementById('typoSubAlignSelect').value = savedTypoPrefs.subHeading.alignment || 'LEFT';
+            document.getElementById('typoSubBgToggle').checked = !!savedTypoPrefs.subHeading.bgEnabled;
+            document.getElementById('typoSubBgStyleSelect').value = savedTypoPrefs.subHeading.bgStyle || 'inline';
+            document.getElementById('typoSubColor').value = savedTypoPrefs.subHeading.textColor || '#2563EB';
+            document.getElementById('typoSubBgColor').value = savedTypoPrefs.subHeading.bgColor || '#F1F5F9';
+          }
+          if (savedTypoPrefs.body) {
+            document.getElementById('typoBodyFontSelect').value = savedTypoPrefs.body.fontFamily || 'Roboto';
+            document.getElementById('typoBodySizeSelect').value = savedTypoPrefs.body.fontSize || '11';
+            document.getElementById('typoBodyAlignSelect').value = savedTypoPrefs.body.alignment || 'LEFT';
+            document.getElementById('typoBodyColor').value = savedTypoPrefs.body.textColor || '#1F2937';
+            document.getElementById('typoBodyApplyToggle').checked = savedTypoPrefs.body.applyToBody !== undefined ? savedTypoPrefs.body.applyToBody : true;
+          }
+
+          function onTypographyPresetChange() {
+            const val = document.getElementById('typoPresetSelect').value;
+            if (val !== 'custom' && TYPOGRAPHY_PRESETS[val]) {
+              const p = TYPOGRAPHY_PRESETS[val];
+              document.getElementById('typoTitleFontSelect').value = p.titleFont;
+              document.getElementById('typoTitleSizeSelect').value = p.titleSize;
+              document.getElementById('typoTitleAlignSelect').value = p.titleAlign;
+              document.getElementById('typoTitleBgToggle').checked = p.titleBgEnabled;
+              document.getElementById('typoTitleBgStyleSelect').value = p.titleBgStyle;
+              document.getElementById('typoTitleColor').value = p.titleColor;
+              document.getElementById('typoTitleBgColor').value = p.titleBgColor;
+
+              document.getElementById('typoH1FontSelect').value = p.h1Font;
+              document.getElementById('typoH1SizeSelect').value = p.h1Size;
+              document.getElementById('typoH1AlignSelect').value = p.h1Align;
+              document.getElementById('typoH1BgToggle').checked = p.h1BgEnabled;
+              document.getElementById('typoH1BgStyleSelect').value = p.h1BgStyle;
+              document.getElementById('typoH1Color').value = p.h1Color;
+              document.getElementById('typoH1BgColor').value = p.h1BgColor;
+
+              document.getElementById('typoSubFontSelect').value = p.subFont;
+              document.getElementById('typoSubSizeSelect').value = p.subSize;
+              document.getElementById('typoSubAlignSelect').value = p.subAlign;
+              document.getElementById('typoSubBgToggle').checked = p.subBgEnabled;
+              document.getElementById('typoSubBgStyleSelect').value = p.subBgStyle;
+              document.getElementById('typoSubColor').value = p.subColor;
+              document.getElementById('typoSubBgColor').value = p.subBgColor;
+
+              document.getElementById('typoBodyFontSelect').value = p.bodyFont;
+              document.getElementById('typoBodySizeSelect').value = p.bodySize;
+              document.getElementById('typoBodyAlignSelect').value = p.bodyAlign;
+              document.getElementById('typoBodyColor').value = p.bodyColor;
+              document.getElementById('typoBodyApplyToggle').checked = p.bodyApply;
+            }
+            updateTypographyPreview();
+          }
+
+          function setTypoCustomMode() {
+            document.getElementById('typoPresetSelect').value = 'custom';
+            updateTypographyPreview();
+          }
+
+          function updateTypographyPreview() {
+            // Title Preview
+            const tFont = document.getElementById('typoTitleFontSelect').value;
+            const tSize = parseFloat(document.getElementById('typoTitleSizeSelect').value) || 26;
+            const tAlign = document.getElementById('typoTitleAlignSelect').value;
+            const tBgEnabled = document.getElementById('typoTitleBgToggle').checked;
+            const tBgStyle = document.getElementById('typoTitleBgStyleSelect').value;
+            const tColor = document.getElementById('typoTitleColor').value;
+            const tBgColor = document.getElementById('typoTitleBgColor').value;
+
+            const prevTitleBox = document.getElementById('prevTitleBox');
+            const prevTitleText = document.getElementById('prevTitleText');
+            prevTitleBox.style.textAlign = tAlign.toLowerCase();
+            prevTitleText.style.fontFamily = tFont + ', sans-serif';
+            prevTitleText.style.fontSize = Math.round(tSize * 0.72) + 'px';
+            prevTitleText.style.fontWeight = 'bold';
+            prevTitleText.style.color = tColor;
+
+            if (tBgEnabled && tBgStyle === 'banner') {
+              prevTitleBox.style.backgroundColor = tBgColor;
+              prevTitleBox.style.padding = '6px 8px';
+              prevTitleBox.style.borderRadius = '4px';
+              prevTitleText.style.backgroundColor = 'transparent';
+              prevTitleText.style.padding = '0';
+            } else if (tBgEnabled && tBgStyle === 'inline') {
+              prevTitleBox.style.backgroundColor = 'transparent';
+              prevTitleBox.style.padding = '0';
+              prevTitleText.style.backgroundColor = tBgColor;
+              prevTitleText.style.padding = '1px 5px';
+              prevTitleText.style.borderRadius = '3px';
+            } else {
+              prevTitleBox.style.backgroundColor = 'transparent';
+              prevTitleBox.style.padding = '0';
+              prevTitleText.style.backgroundColor = 'transparent';
+              prevTitleText.style.padding = '0';
+            }
+
+            // H1 Preview
+            const h1Font = document.getElementById('typoH1FontSelect').value;
+            const h1Size = parseFloat(document.getElementById('typoH1SizeSelect').value) || 18;
+            const h1Align = document.getElementById('typoH1AlignSelect').value;
+            const h1BgEnabled = document.getElementById('typoH1BgToggle').checked;
+            const h1BgStyle = document.getElementById('typoH1BgStyleSelect').value;
+            const h1Color = document.getElementById('typoH1Color').value;
+            const h1BgColor = document.getElementById('typoH1BgColor').value;
+
+            const prevH1Box = document.getElementById('prevH1Box');
+            const prevH1Text = document.getElementById('prevH1Text');
+            prevH1Box.style.textAlign = h1Align.toLowerCase();
+            prevH1Text.style.fontFamily = h1Font + ', sans-serif';
+            prevH1Text.style.fontSize = Math.round(h1Size * 0.75) + 'px';
+            prevH1Text.style.fontWeight = 'bold';
+            prevH1Text.style.color = h1Color;
+
+            if (h1BgEnabled && h1BgStyle === 'banner') {
+              prevH1Box.style.backgroundColor = h1BgColor;
+              prevH1Box.style.padding = '5px 8px';
+              prevH1Box.style.borderRadius = '4px';
+              prevH1Text.style.backgroundColor = 'transparent';
+              prevH1Text.style.padding = '0';
+            } else if (h1BgEnabled && h1BgStyle === 'inline') {
+              prevH1Box.style.backgroundColor = 'transparent';
+              prevH1Box.style.padding = '0';
+              prevH1Text.style.backgroundColor = h1BgColor;
+              prevH1Text.style.padding = '1px 5px';
+              prevH1Text.style.borderRadius = '3px';
+            } else {
+              prevH1Box.style.backgroundColor = 'transparent';
+              prevH1Box.style.padding = '0';
+              prevH1Text.style.backgroundColor = 'transparent';
+              prevH1Text.style.padding = '0';
+            }
+
+            // Sub-Heading Preview
+            const subFont = document.getElementById('typoSubFontSelect').value;
+            const subSize = parseFloat(document.getElementById('typoSubSizeSelect').value) || 14;
+            const subAlign = document.getElementById('typoSubAlignSelect').value;
+            const subBgEnabled = document.getElementById('typoSubBgToggle').checked;
+            const subBgStyle = document.getElementById('typoSubBgStyleSelect').value;
+            const subColor = document.getElementById('typoSubColor').value;
+            const subBgColor = document.getElementById('typoSubBgColor').value;
+
+            const prevSubBox = document.getElementById('prevSubBox');
+            const prevSubText = document.getElementById('prevSubText');
+            prevSubBox.style.textAlign = subAlign.toLowerCase();
+            prevSubText.style.fontFamily = subFont + ', sans-serif';
+            prevSubText.style.fontSize = Math.round(subSize * 0.8) + 'px';
+            prevSubText.style.fontWeight = 'bold';
+            prevSubText.style.color = subColor;
+
+            if (subBgEnabled && subBgStyle === 'banner') {
+              prevSubBox.style.backgroundColor = subBgColor;
+              prevSubBox.style.padding = '4px 7px';
+              prevSubBox.style.borderRadius = '3px';
+              prevSubText.style.backgroundColor = 'transparent';
+              prevSubText.style.padding = '0';
+            } else if (subBgEnabled && subBgStyle === 'inline') {
+              prevSubBox.style.backgroundColor = 'transparent';
+              prevSubBox.style.padding = '0';
+              prevSubText.style.backgroundColor = subBgColor;
+              prevSubText.style.padding = '1px 4px';
+              prevSubText.style.borderRadius = '2px';
+            } else {
+              prevSubBox.style.backgroundColor = 'transparent';
+              prevSubBox.style.padding = '0';
+              prevSubText.style.backgroundColor = 'transparent';
+              prevSubText.style.padding = '0';
+            }
+
+            // Body Preview
+            const bFont = document.getElementById('typoBodyFontSelect').value;
+            const bSize = parseFloat(document.getElementById('typoBodySizeSelect').value) || 11;
+            const bAlign = document.getElementById('typoBodyAlignSelect').value;
+            const bColor = document.getElementById('typoBodyColor').value;
+
+            const prevBodyBox = document.getElementById('prevBodyBox');
+            const prevBodyText = document.getElementById('prevBodyText');
+            prevBodyBox.style.textAlign = bAlign.toLowerCase();
+            prevBodyText.style.fontFamily = bFont + ', sans-serif';
+            prevBodyText.style.fontSize = Math.round(bSize * 0.9) + 'px';
+            prevBodyText.style.color = bColor;
+          }
+
+          function getTypographyOptions() {
+            return {
+              preset: document.getElementById('typoPresetSelect').value,
+              title: {
+                fontFamily: document.getElementById('typoTitleFontSelect').value,
+                fontSize: parseFloat(document.getElementById('typoTitleSizeSelect').value) || 26,
+                textColor: document.getElementById('typoTitleColor').value,
+                alignment: document.getElementById('typoTitleAlignSelect').value,
+                bold: true,
+                bgEnabled: document.getElementById('typoTitleBgToggle').checked,
+                bgColor: document.getElementById('typoTitleBgColor').value,
+                bgStyle: document.getElementById('typoTitleBgStyleSelect').value
+              },
+              heading1: {
+                fontFamily: document.getElementById('typoH1FontSelect').value,
+                fontSize: parseFloat(document.getElementById('typoH1SizeSelect').value) || 18,
+                textColor: document.getElementById('typoH1Color').value,
+                alignment: document.getElementById('typoH1AlignSelect').value,
+                bold: true,
+                bgEnabled: document.getElementById('typoH1BgToggle').checked,
+                bgColor: document.getElementById('typoH1BgColor').value,
+                bgStyle: document.getElementById('typoH1BgStyleSelect').value
+              },
+              subHeading: {
+                fontFamily: document.getElementById('typoSubFontSelect').value,
+                fontSize: parseFloat(document.getElementById('typoSubSizeSelect').value) || 14,
+                textColor: document.getElementById('typoSubColor').value,
+                alignment: document.getElementById('typoSubAlignSelect').value,
+                bold: true,
+                bgEnabled: document.getElementById('typoSubBgToggle').checked,
+                bgColor: document.getElementById('typoSubBgColor').value,
+                bgStyle: document.getElementById('typoSubBgStyleSelect').value
+              },
+              body: {
+                applyToBody: document.getElementById('typoBodyApplyToggle').checked,
+                fontFamily: document.getElementById('typoBodyFontSelect').value,
+                fontSize: parseFloat(document.getElementById('typoBodySizeSelect').value) || 11,
+                textColor: document.getElementById('typoBodyColor').value,
+                alignment: document.getElementById('typoBodyAlignSelect').value
+              }
+            };
+          }
+
+          function setTypographyStatus(msg, type) {
+            const el = document.getElementById('typoStatus');
+            el.className = 'status-box ' + type;
+            el.innerText = msg;
+          }
+
+          function runFormatDocumentTypography() {
+            setTypographyStatus('Formatting document typography...', 'loading');
+            document.getElementById('btnFormatDocTypo').disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                document.getElementById('btnFormatDocTypo').disabled = false;
+                setTypographyStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('btnFormatDocTypo').disabled = false;
+                setTypographyStatus('Error: ' + err, 'error');
+              })
+              .formatDocumentTypography(getTypographyOptions());
+          }
+
+          function runFormatSelectedTypography() {
+            setTypographyStatus('Formatting selected text typography...', 'loading');
+            document.getElementById('btnFormatSelectedTypo').disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                document.getElementById('btnFormatSelectedTypo').disabled = false;
+                setTypographyStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('btnFormatSelectedTypo').disabled = false;
+                setTypographyStatus('Error: ' + err, 'error');
+              })
+              .formatSelectedTypography(getTypographyOptions());
+          }
+
+          function runUndoDocumentTypography() {
+            if (!confirm('Are you sure you want to reset all document headings and body text to standard defaults?')) {
+              return;
+            }
+            setTypographyStatus('Resetting typography to defaults...', 'loading');
+            document.getElementById('btnUndoDocTypo').disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                document.getElementById('btnUndoDocTypo').disabled = false;
+                setTypographyStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('btnUndoDocTypo').disabled = false;
+                setTypographyStatus('Error: ' + err, 'error');
+              })
+              .undoDocumentTypography();
           }
 
           /* =========================================================
@@ -2199,6 +3410,7 @@ function getSidebarHtml() {
           }
 
           // Initialize previews on load
+          updateTypographyPreview();
           onTableThemeChange();
           onCodeThemeChange();
         </script>

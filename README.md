@@ -24,8 +24,8 @@
 - **🦓 Smart Alternating Rows (Zebra Striping)**: Enhanced visual rhythm for scanning rows and dense data grids.
 - **🎯 Intelligent Cell Typography & Alignment**:
   - **Font Families**: Roboto, Arial, Inter, Open Sans, Lato, Montserrat, Calibri, Trebuchet MS, Georgia, Merriweather, Times New Roman, or Consolas.
-  - **Header Row**: Middle-aligned (centered) with larger bold typography (10.5–13pt).
-  - **Table Text (Data Rows)**: Strictly left-aligned (not centered or right-aligned) with clean body typography (8.5–10pt).
+  - **Header Row**: Middle-aligned (centered) with larger bold typography (8.5–20pt).
+  - **Table Text (Data Rows)**: Strictly left-aligned (not centered or right-aligned) with clean body typography (8–20pt).
   - **Table Element**: Centered on page across document margins.
   - Refined cell padding (Compact, Normal, Relaxed) and soft borders.
 - **🛡️ Code Block Safety**: Automatically differentiates between regular data tables and code containers, keeping your syntax highlighting intact while centering both!
@@ -43,7 +43,7 @@
 - **🔒 Curly Brace Tracking Engine**: Uses net `{` and `}` balance counting to guarantee functions, loops, and nested classes never get split into fragmented chunks, even across multiple blank lines.
 - **🚫 No Markdown Required**: You don't need to wrap code in triple backticks (\`\`\`). Simply paste your code anywhere in the document.
 - **🎨 Interactive Sidebar Themes**: GitHub Light, Dracula Dark, Monokai Dark, Solarized Light, or Custom.
-- **🔤 Expanded Monospace Fonts**: Consolas, Roboto Mono, Courier New, Inconsolata, Source Code Pro, Space Mono, PT Mono, and Ubuntu Mono with font sizes from 8.5pt to 12pt.
+- **🔤 Expanded Monospace Fonts**: Consolas, Roboto Mono, Courier New, Inconsolata, Source Code Pro, Space Mono, PT Mono, and Ubuntu Mono with font sizes from 8pt to 20pt.
 - **🧠 Prose Rejection Heuristics**: Distinguishes between actual code lines and natural conversational English sentences so regular text is never converted.
 - **💾 Auto-Saved Preferences**: Automatically remembers your chosen fonts, colors, padding, indentation, and font sizes for future sessions.
 

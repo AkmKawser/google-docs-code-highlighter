@@ -1493,21 +1493,45 @@ function getSidebarHtml() {
           <div class="control-group">
             <label>Header Font Size (Bigger)</label>
             <select id="tableHeaderFontSelect" onchange="updateTablePreview()">
+              <option value="8.5">8.5 pt</option>
+              <option value="9">9 pt</option>
+              <option value="9.5">9.5 pt</option>
+              <option value="10">10 pt</option>
               <option value="10.5">10.5 pt</option>
               <option value="11" selected>11 pt (Recommended)</option>
               <option value="11.5">11.5 pt</option>
               <option value="12">12 pt (Prominent)</option>
               <option value="13">13 pt (Large)</option>
+              <option value="14">14 pt</option>
+              <option value="15">15 pt</option>
+              <option value="16">16 pt</option>
+              <option value="17">17 pt</option>
+              <option value="18">18 pt</option>
+              <option value="19">19 pt</option>
+              <option value="20">20 pt (Extra Large)</option>
             </select>
           </div>
 
           <div class="control-group">
             <label>Data Rows Font Size</label>
             <select id="tableBodyFontSelect" onchange="updateTablePreview()">
+              <option value="8">8 pt</option>
               <option value="8.5">8.5 pt (Compact)</option>
               <option value="9">9 pt</option>
               <option value="9.5" selected>9.5 pt (Default)</option>
               <option value="10">10 pt</option>
+              <option value="10.5">10.5 pt</option>
+              <option value="11">11 pt</option>
+              <option value="11.5">11.5 pt</option>
+              <option value="12">12 pt</option>
+              <option value="13">13 pt</option>
+              <option value="14">14 pt</option>
+              <option value="15">15 pt</option>
+              <option value="16">16 pt</option>
+              <option value="17">17 pt</option>
+              <option value="18">18 pt</option>
+              <option value="19">19 pt</option>
+              <option value="20">20 pt (Extra Large)</option>
             </select>
           </div>
 
@@ -1640,11 +1664,23 @@ function getSidebarHtml() {
           <div class="control-group">
             <label>Font Size</label>
             <select id="codeFontSizeSelect" onchange="updateCodePreview()">
+              <option value="8">8 pt</option>
               <option value="8.5">8.5 pt (Compact)</option>
+              <option value="9">9 pt</option>
               <option value="9.5" selected>9.5 pt (Default)</option>
               <option value="10">10 pt</option>
-              <option value="11">11 pt (Large)</option>
-              <option value="12">12 pt</option>
+              <option value="10.5">10.5 pt</option>
+              <option value="11">11 pt</option>
+              <option value="11.5">11.5 pt</option>
+              <option value="12">12 pt (Large)</option>
+              <option value="13">13 pt</option>
+              <option value="14">14 pt</option>
+              <option value="15">15 pt</option>
+              <option value="16">16 pt</option>
+              <option value="17">17 pt</option>
+              <option value="18">18 pt</option>
+              <option value="19">19 pt</option>
+              <option value="20">20 pt (Extra Large)</option>
             </select>
           </div>
 
@@ -2015,6 +2051,8 @@ function getSidebarHtml() {
             box.style.color = text;
             box.style.borderColor = border;
             box.style.fontFamily = font + ', monospace';
+            const cFontSize = document.getElementById('codeFontSizeSelect').value;
+            box.style.fontSize = parseFloat(cFontSize) + 'px';
 
             // Indentation preview
             const indentVal = document.getElementById('codeIndentSelect').value;

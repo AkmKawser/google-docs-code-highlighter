@@ -1,3 +1,4 @@
+# Upcoming Upgrade : add a button to undo all code blocks fomratting in the code block panel and same for table format panel also add the code indention feature. 
 # ⚡ Google Docs Code Highlighter & Table Formatter
 
 > A smart Google Apps Script tool that automatically highlights code blocks, formats tables with professional colorful themes & zebra striping, and aligns everything in the middle of your Google Docs — with a dual-tab sidebar and zero markdown backticks required.

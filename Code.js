@@ -27,8 +27,32 @@ function onOpen() {
     .addItem('⚡ Highlight Selected Code', 'formatSelectedCodeBlock')
     .addItem('📐 Auto-Indent All Code Blocks', 'quickIndentAllCode')
     .addItem('↩ Undo All Code Blocks Formatting', 'quickUndoAllCodeBlocks')
+    .addSeparator()
+    .addItem('🔖 Remove All Bookmarks', 'quickRemoveAllBookmarks')
+    .addSeparator()
+    .addSubMenu(DocumentApp.getUi().createMenu('✨ Text Cleanup & Spacing')
+      .addItem('🧹 Cleanup Text (Spaces, Quotes, Dashes)', 'quickCleanupDocumentText')
+      .addItem('📐 Normalize Paragraph Spacing', 'quickNormalizeDocumentSpacing')
+      .addItem('✦ Apply Inline Markdown (bold/italic/~~strikethrough~~)', 'quickApplyInlineMarkdown')
+      .addItem('🔢 Auto-Number Headings (1. / 1.1 / 1.1.1)', 'quickApplyHeadingNumbers')
+      .addItem('📋 Convert Markdown Lists (- item, • item)', 'quickConvertMarkdownLists')
+      .addItem('🔡 Heading → UPPERCASE', 'quickHeadingsToUpperCase')
+      .addItem('🔡 Heading → Title Case', 'quickHeadingsToTitleCase')
+    )
     .addToUi();
 }
+
+/**
+ * Quick action to remove all bookmarks from the document menu
+ */
+function quickRemoveAllBookmarks() {
+  const result = removeAllBookmarks();
+  const msg = result.count > 0
+    ? 'Removed ' + result.count + ' bookmark(s) from the document.'
+    : 'No bookmarks found in the document.';
+  DocumentApp.getUi().alert('🔖 Remove Bookmarks', msg, DocumentApp.getUi().ButtonSet.OK);
+}
+
 
 /**
  * Opens the styling sidebar in Google Docs
@@ -80,6 +104,7 @@ function formatAllDocumentTables(options) {
 
   const doc = DocumentApp.getActiveDocument();
   const body = doc.getBody();
+  // Snapshot table list before any DOM mutations
   const tables = body.getTables();
 
   if (!tables || tables.length === 0) {
@@ -89,20 +114,23 @@ function formatAllDocumentTables(options) {
   let formattedCount = 0;
   for (let i = 0; i < tables.length; i++) {
     const table = tables[i];
-    
+
     // Check if this table is a 1x1 code block or heading banner
     if (isCodeBlockTable(table)) {
       // Center code block table to page width without overriding syntax styles
       centerTableOnPage(table, body);
+      ensureDoubleNewlineAfterElement(body, table);
       continue;
     }
     if (isHeadingBannerTable(table)) {
       // Center heading banner table to page width without overriding typography styles
       centerTableOnPage(table, body);
+      ensureDoubleNewlineAfterElement(body, table);
       continue;
     }
 
     formatSingleTable(table, options, body);
+    // Note: formatSingleTable already calls ensureDoubleNewlineAfterElement internally
     formattedCount++;
   }
 
@@ -335,6 +363,50 @@ function isHeadingBannerTable(table) {
  * Aligns a table to the exact center of the page by sizing its columns
  * to match the printable width between left and right document margins.
  */
+/**
+ * Ensures exactly two empty (NORMAL) paragraphs exist immediately after a given
+ * table or block element in the body. Adds missing empty paragraphs; trims
+ * extras beyond two. This guarantees visual breathing room after code blocks
+ * and data tables without creating runaway blank lines.
+ */
+function ensureDoubleNewlineAfterElement(body, element) {
+  try {
+    const idx = body.getChildIndex(element);
+    if (idx < 0) return;
+
+    const total = body.getNumChildren();
+    let blankCount = 0;
+    let scanIdx = idx + 1;
+
+    // Count consecutive empty paragraphs right after the element
+    while (scanIdx < total) {
+      const sibling = body.getChild(scanIdx);
+      if (sibling.getType() === DocumentApp.ElementType.PARAGRAPH &&
+          sibling.asParagraph().getText().trim() === '') {
+        blankCount++;
+        scanIdx++;
+      } else {
+        break;
+      }
+    }
+
+    // Add missing empty paragraphs
+    for (let add = blankCount; add < 2; add++) {
+      const newPara = body.insertParagraph(idx + 1 + blankCount + (add - blankCount), '');
+      newPara.setFontFamily('Arial');
+      newPara.setFontSize(11);
+      try { safeSetHeading(newPara, DocumentApp.ParagraphHeading.NORMAL); } catch(e) {}
+    }
+
+    // Remove surplus empty paragraphs beyond two
+    if (blankCount > 2) {
+      for (let rem = blankCount; rem > 2; rem--) {
+        try { body.getChild(idx + 1 + rem - 1).removeFromParent(); } catch(e) { break; }
+      }
+    }
+  } catch(e) {}
+}
+
 function centerTableOnPage(table, body) {
   const numRows = table.getNumRows();
   if (numRows === 0) return;
@@ -505,6 +577,9 @@ function formatSingleTable(table, options, body) {
       }
     }
   }
+
+  // Ensure two empty paragraphs follow this table for readability
+  ensureDoubleNewlineAfterElement(body, table);
 }
 
 /**
@@ -643,6 +718,7 @@ function highlightAllCodeBlocks(options) {
   let inCode = false;
   let inFencedCode = false;
   let braceDepth = 0;
+  let classContext = false; // true when inside a class/struct/pseudocode class body
   let currentGroup = [];
   let blankBuffer = [];
 
@@ -679,19 +755,23 @@ function highlightAllCodeBlocks(options) {
       continue;
     }
 
-    // 2. Syntax-based / Indented Code Block Handler
+      // 2. Syntax-based / Indented Code Block Handler
     if (!inCode) {
       if (isCodeStart(text)) {
         inCode = true;
         currentGroup.push(p);
         blankBuffer = [];
         braceDepth = Math.max(0, getNetBraceCount(text));
+        // Detect class/pseudocode context (e.g. "class Invoice:", "class Foo:")
+        if (/^(class|interface|struct|enum)\s+\w.*:?\s*$/.test(trimmed)) {
+          classContext = true;
+        }
       }
     } else {
       // 1. LOCKED BY CURLY BRACES
       if (braceDepth > 0) {
         if (blankBuffer.length > 0) {
-          currentGroup = currentGroup.concat(blankBuffer);
+          currentGroup.push(blankBuffer[0]); // at most 1 blank line carried forward
           blankBuffer = [];
         }
         currentGroup.push(p);
@@ -702,16 +782,40 @@ function highlightAllCodeBlocks(options) {
       // 2. OUTSIDE BRACES (braceDepth === 0)
       if (trimmed.length === 0) {
         blankBuffer.push(p);
-        if (blankBuffer.length > 2) finishGroup();
+        // Close if more than 3 consecutive blank lines
+        if (blankBuffer.length > 3) finishGroup();
+      } else if (isEllipsis(trimmed)) {
+        // Ellipsis / continuation marker (... or …) is always part of pseudocode.
+        // Only carry forward 1 blank line max to avoid huge gaps.
+        if (blankBuffer.length > 0) {
+          currentGroup.push(blankBuffer[0]); // at most 1 blank line per gap
+          blankBuffer = [];
+        }
+        currentGroup.push(p);
       } else if (isStrongProse(text)) {
+        // Strong prose ALWAYS closes the block — even inside a class context.
+        // This prevents body-text paragraphs from being absorbed into code.
         finishGroup();
       } else if (isCodeLine(text)) {
+        // Carry forward at most 1 blank line per gap to avoid excess spacing
         if (blankBuffer.length > 0) {
-          currentGroup = currentGroup.concat(blankBuffer);
+          currentGroup.push(blankBuffer[0]);
           blankBuffer = [];
         }
         currentGroup.push(p);
         braceDepth = Math.max(0, braceDepth + getNetBraceCount(text));
+        // Extend class context on nested function/method declarations
+        if (/^(function|def|method|procedure|constructor)\s+\w.*[(:)]/.test(trimmed)) {
+          classContext = true;
+        }
+      } else if (classContext && /^[A-Za-z_$][\w$]*$/.test(trimmed)) {
+        // Bare single-word identifier inside a class body (e.g. field names 'items', 'customer').
+        // Only absorb when classContext is active and line is a simple identifier.
+        if (blankBuffer.length > 0) {
+          currentGroup.push(blankBuffer[0]);
+          blankBuffer = [];
+        }
+        currentGroup.push(p);
       } else {
         finishGroup();
       }
@@ -732,6 +836,7 @@ function highlightAllCodeBlocks(options) {
     inCode = false;
     inFencedCode = false;
     braceDepth = 0;
+    classContext = false; // reset class/pseudocode context on group close
   }
 
   if (codeGroups.length === 0) {
@@ -759,6 +864,11 @@ function getNetBraceCount(text) {
   return openCount - closeCount;
 }
 
+function isEllipsis(trimmed) {
+  // Matches literal '...', the Unicode ellipsis '…', or '--' standalone continuation markers
+  return trimmed === '...' || trimmed === '\u2026' || trimmed === '--' || /^\.{2,6}$/.test(trimmed);
+}
+
 function isCodeStart(text) {
   const trimmed = text.trim();
   if (!trimmed) return false;
@@ -767,6 +877,10 @@ function isCodeStart(text) {
 
   // Never match markdown headings as code comments
   if (/^#{1,6}\s+/.test(trimmed)) return false;
+
+  // Pseudocode / class declarations with colon terminator (e.g. "class Invoice:", "function foo():")
+  if (/^(class|interface|struct|enum|record)\s+\w[\w\s<>,]*:?\s*$/.test(trimmed)) return true;
+  if (/^(function|def|method|procedure|constructor|fn)\s+\w[\w\s(),<>]*:?\s*$/.test(trimmed)) return true;
 
   const startPatterns = [
     /^(def|class|function|const|let|var|import|export|public|private|protected|static|package|namespace)\b/,
@@ -789,12 +903,17 @@ function isCodeLine(text) {
   const trimmed = text.trim();
   if (!trimmed) return true;
   if (/^```/.test(trimmed)) return true;
+  if (isEllipsis(trimmed)) return true;  // ... and … are always code continuations
   if (isStrongProse(trimmed)) return false;
   if (/^\s*[}\])];?$/.test(trimmed)) return true;
   if (/^\s*\.[A-Za-z0-9_$]+/.test(trimmed)) return true;
   if (/^\s{2,}|\t/.test(text)) return true;
   if (/^(return|break|continue|pass|throw|export|default)\b/.test(trimmed)) return true;
   if (/[{};]$/.test(trimmed)) return true;
+  // Colon-terminated identifiers (pseudocode method/property declarations)
+  if (/^[A-Za-z_$][\w$]*\s*[:(]/.test(trimmed)) return true;
+  // Single bare identifier (field name in a class body like 'items', 'customer')
+  if (/^[A-Za-z_$][\w$]*$/.test(trimmed)) return true;
   return isCodeStart(text);
 }
 
@@ -802,9 +921,12 @@ function isStrongProse(text) {
   const trimmed = text.trim();
   if (!trimmed) return false;
   if (/^```/.test(trimmed)) return false;
+  if (isEllipsis(trimmed)) return false;  // never treat ellipsis as prose
   if (/^(def|class|function|const|let|var|import|export|return|public|private|static|if|for|while)\b/.test(trimmed)) return false;
   if (/[{};]$/.test(trimmed) || /(=>|===|!==)/.test(trimmed)) return false;
   if (/^\s{2,}|\t/.test(text)) return false;
+  // Single-word lines are never strong prose (could be variable/field names)
+  if (!/\s/.test(trimmed)) return false;
 
   const words = trimmed.toLowerCase().split(/\s+/);
   const stopWords = ['the', 'this', 'that', 'with', 'and', 'are', 'can', 'you', 'we', 'our', 'will', 'should', 'about', 'there', 'from', 'which', 'because', 'also', 'here', 'when', 'then', 'into', 'have', 'been', 'would', 'could'];
@@ -813,6 +935,84 @@ function isStrongProse(text) {
   if (proseCount >= 2 && /[.!?:]$/.test(trimmed)) return true;
   if (proseCount >= 4) return true;
   return false;
+}
+
+/**
+ * Normalizes code and pseudocode line spacing to professional standards:
+ * - Trims leading and trailing empty lines from the code block.
+ * - Collapses consecutive empty lines into at most one empty line.
+ * - Removes unnecessary blank lines right after opening statements (class, function, def, opening braces/colons).
+ * - Removes unnecessary blank lines right before closing braces/brackets.
+ * - Normalizes spacing around pseudocode continuation markers (... or …) so they don't produce excessive vertical gaps.
+ */
+function normalizeCodeSpacing(lines) {
+  if (!lines || lines.length === 0) return [''];
+
+  // 1. Strip leading and trailing empty lines
+  let start = 0;
+  while (start < lines.length && lines[start].trim().length === 0) {
+    start++;
+  }
+  let end = lines.length - 1;
+  while (end >= start && lines[end].trim().length === 0) {
+    end--;
+  }
+  if (start > end) return [''];
+  const trimmedLines = lines.slice(start, end + 1);
+
+  // 2. Collapse consecutive blank lines and strip redundant blanks
+  const cleaned = [];
+  for (let i = 0; i < trimmedLines.length; i++) {
+    const raw = trimmedLines[i];
+    const trimmed = raw.trim();
+    const isBlank = trimmed.length === 0;
+
+    if (isBlank) {
+      // Never allow multiple consecutive blank lines
+      if (cleaned.length > 0 && cleaned[cleaned.length - 1].trim().length === 0) {
+        continue;
+      }
+      // Never allow a blank line immediately after class / function declaration or opening bracket/colon
+      if (cleaned.length > 0) {
+        const prev = cleaned[cleaned.length - 1].trim();
+        if (/^(class|interface|struct|enum|record|def|function|method|procedure)\s+\w.*:?\s*$/.test(prev) ||
+            /[:{[(]$/.test(prev)) {
+          continue;
+        }
+      }
+      cleaned.push('');
+    } else {
+      // Never allow a blank line immediately before a closing bracket
+      if (/^[}\])]$/.test(trimmed)) {
+        if (cleaned.length > 0 && cleaned[cleaned.length - 1].trim().length === 0) {
+          cleaned.pop();
+        }
+      }
+      cleaned.push(raw);
+    }
+  }
+
+  // 3. Normalize spacing around ellipsis / continuation markers (... or …)
+  const result = [];
+  for (let i = 0; i < cleaned.length; i++) {
+    const raw = cleaned[i];
+    const trimmed = raw.trim();
+    if (isEllipsis(trimmed)) {
+      // If preceded by a blank line, remove that blank line
+      if (result.length > 0 && result[result.length - 1].trim().length === 0) {
+        result.pop();
+      }
+      result.push(raw);
+      // If followed by a blank line, skip that blank line
+      if (i + 1 < cleaned.length && cleaned[i + 1].trim().length === 0) {
+        i++;
+      }
+      continue;
+    }
+    result.push(raw);
+  }
+
+  return result.length > 0 ? result : [''];
 }
 
 /**
@@ -856,6 +1056,9 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
   }
   if (rawLines.length === 0) rawLines = [''];
 
+  // Normalize code spacing: remove extra newlines, collapse blanks, clean up pseudocode
+  rawLines = normalizeCodeSpacing(rawLines);
+
   const indentStyle = options.indentStyle || 'auto-2';
   const formattedLines = formatCodeIndentation(rawLines, indentStyle);
 
@@ -870,6 +1073,8 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
     line.setFontFamily(fontFamily);
     line.setFontSize(fontSize);
     line.setLineSpacing(1.15);
+    line.setSpacingBefore(0);
+    line.setSpacingAfter(0);
     line.setForegroundColor(textColor);
     
     const textObj = line.editAsText();
@@ -884,6 +1089,9 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
   paragraphGroup.forEach(p => {
     p.removeFromParent();
   });
+
+  // Ensure two empty paragraphs follow the code block for readability
+  ensureDoubleNewlineAfterElement(body, table);
 }
 
 function formatSelectedCodeBlock(options) {
@@ -1087,6 +1295,8 @@ function indentSingleCodeBlock(table, indentStyle, options) {
     p.setFontFamily(fontFamily);
     p.setFontSize(fontSize);
     p.setLineSpacing(1.15);
+    p.setSpacingBefore(0);
+    p.setSpacingAfter(0);
     p.setForegroundColor(textColor);
     const textObj = p.editAsText();
     if (textObj.getText().length > 0) {
@@ -1181,13 +1391,18 @@ function smartIndentFlatLines(textLines, unit) {
       level = Math.max(0, level - 1);
     }
 
+    // Step back to member level for sibling function/method declarations in pseudocode or Python
+    if (/^(function|def|method|procedure)\s+\w.*[(:]/.test(trimmed)) {
+      if (level >= 2) level = 1;
+    }
+
     result.push(unit.repeat(level) + trimmed);
 
     const opens = (clean.match(/[{[(]|<[a-zA-Z0-9_-]+(?:\s+[^>]*?)?(?<!\/)>/g) || []).length;
     const closes = (clean.match(/[}\])]|<\/[a-zA-Z0-9_-]+>/g) || []).length;
     let net = opens - closes;
 
-    if (/:\s*$/.test(clean) && !startsClosing && opens === 0 && closes === 0) {
+    if (/:\s*$/.test(clean) && !startsClosing && opens === closes) {
       net = 1;
     }
 
@@ -1212,6 +1427,51 @@ function getIndentLabel(style) {
   }
 }
 
+/**
+ * Universal theme palettes for syntax highlighting
+ */
+const CODE_THEMES = {
+  'github-light': {
+    bg: '#F6F8FA', text: '#24292F', border: '#D0D7DE',
+    kw: '#CF222E', str: '#0A3069', com: '#6E7781', num: '#0550AE',
+    fn: '#8250DF', type: '#953800', bool: '#CF222E', special: '#0550AE', op: '#0550AE'
+  },
+  'one-dark': {
+    bg: '#21252B', text: '#ABB2BF', border: '#3B4048',
+    kw: '#C678DD', str: '#98C379', com: '#5C6370', num: '#D19A66',
+    fn: '#61AFEF', type: '#E5C07B', bool: '#D19A66', special: '#E06C75', op: '#56B6C2'
+  },
+  'dracula': {
+    bg: '#282A36', text: '#F8F8F2', border: '#44475A',
+    kw: '#FF79C6', str: '#F1FA8C', com: '#6272A4', num: '#BD93F9',
+    fn: '#50FA7B', type: '#8BE9FD', bool: '#BD93F9', special: '#FFB86C', op: '#FF79C6'
+  },
+  'monokai': {
+    bg: '#272822', text: '#F8F8F2', border: '#3E3D32',
+    kw: '#F92672', str: '#E6DB74', com: '#75715E', num: '#AE81FF',
+    fn: '#A6E22E', type: '#66D9EF', bool: '#AE81FF', special: '#FD971F', op: '#F92672'
+  },
+  'solarized-light': {
+    bg: '#FDF6E3', text: '#657B83', border: '#EEE8D5',
+    kw: '#859900', str: '#2AA198', com: '#93A1A1', num: '#D33682',
+    fn: '#268BD2', type: '#B58900', bool: '#CB4B16', special: '#268BD2', op: '#859900'
+  }
+};
+
+/**
+ * Master Syntax Highlighter: applies rich, multi-token syntax highlighting
+ * with non-overlapping range tracking to ensure clean colors without bleed.
+ * Supports:
+ * - Comments: single-line //, #, and block /* ... * /
+ * - Strings: double, single, template literals
+ * - Keywords: control flow, declarations, storage modifiers, SQL
+ * - Special keywords: this, self, super
+ * - Types & Classes: primitives (int, bool, string, void) and PascalCase classes (Invoice, Customer)
+ * - Functions & Methods: calls foo(), declarations, pseudocode method headers
+ * - Booleans, Null & Constants: true, false, null, undefined, ALL_CAPS
+ * - Numbers: hex, binary, float, integer
+ * - Operators: =>, ===, !==, +, -, *, /, &&, ||, etc.
+ */
 function applySyntaxHighlight(textObj, options) {
   const text = textObj.getText();
   if (!text || text.length === 0) return;
@@ -1222,25 +1482,74 @@ function applySyntaxHighlight(textObj, options) {
     textObj.setBold(0, text.length - 1, false);
   } catch(e) {}
 
-  const kwColor = options.keywordColor || '#CF222E';
-  const strColor = options.stringColor || '#0A3069';
-  const comColor = options.commentColor || '#6E7781';
-  const numColor = options.numberColor || '#953800';
+  options = options || {};
+  const themeName = options.theme || 'github-light';
+  const themeDef = (typeof CODE_THEMES !== 'undefined' && CODE_THEMES[themeName])
+    ? CODE_THEMES[themeName]
+    : CODE_THEMES['github-light'];
 
-  const rules = [
-    { regex: /(\/\/.*$|#.*$)/gm, color: comColor },
-    { regex: /(["'`])(?:(?=(\\?))\2[\s\S])*?\1/g, color: strColor },
-    { regex: /\b(def|class|function|const|let|var|return|if|else|elif|for|while|import|from|export|public|private|protected|async|await|try|catch|finally|new|this|print|self|lambda)\b/g, color: kwColor },
-    { regex: /\b(true|false|null|undefined|None|True|False)\b/g, color: '#D97706' },
-    { regex: /\b\d+(\.\d+)?\b/g, color: numColor }
-  ];
+  const kwColor   = options.keywordColor  || themeDef.kw;
+  const strColor  = options.stringColor   || themeDef.str;
+  const comColor  = options.commentColor  || themeDef.com;
+  const numColor  = options.numberColor   || themeDef.num;
+  const fnColor   = options.functionColor || themeDef.fn || '#8250DF';
+  const typeColor = options.typeColor     || themeDef.type || '#953800';
+  const boolColor = options.boolColor     || themeDef.bool || kwColor;
+  const specColor = options.specialColor  || themeDef.special || kwColor;
+  const opColor   = options.operatorColor || themeDef.op || kwColor;
 
-  rules.forEach(rule => {
-    let match;
-    while ((match = rule.regex.exec(text)) !== null) {
-      textObj.setForegroundColor(match.index, match.index + match[0].length - 1, rule.color);
+  const occupied = new Array(text.length).fill(false);
+
+  function apply(regex, color, useGroup1) {
+    if (!color) return;
+    let m;
+    regex.lastIndex = 0;
+    while ((m = regex.exec(text)) !== null) {
+      const idx = useGroup1 && m[1] !== undefined ? m.index + m[0].indexOf(m[1]) : m.index;
+      const val = useGroup1 && m[1] !== undefined ? m[1] : m[0];
+      const end = idx + val.length - 1;
+      let conflict = false;
+      for (let i = idx; i <= end; i++) {
+        if (occupied[i]) { conflict = true; break; }
+      }
+      if (!conflict) {
+        for (let i = idx; i <= end; i++) occupied[i] = true;
+        try {
+          textObj.setForegroundColor(idx, end, color);
+        } catch(e) {}
+      }
     }
-  });
+  }
+
+  // 1. Comments (claim entire comment span first to prevent keywords matching inside comments)
+  apply(/(\/\/.*$|#.*$|\/\*[\s\S]*?\*\/)/gm, comColor, false);
+
+  // 2. Strings (claim entire string span next)
+  apply(/(["'`])(?:(?=(\\?))\2[\s\S])*?\1/g, strColor, false);
+
+  // 3. Keywords & Declarations
+  apply(/\b(def|class|function|const|let|var|val|fn|sub|procedure|constructor|method|interface|struct|enum|record|type|alias|namespace|package|import|export|from|as|using|public|private|protected|static|final|abstract|override|readonly|mut|volatile|return|if|else|elif|for|while|do|switch|case|default|break|continue|throw|try|catch|finally|yield|await|async|new|delete|typeof|instanceof|lambda|pass|with|in|is|not|and|or|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|JOIN|INNER|LEFT|RIGHT|ON|GROUP|BY|ORDER|HAVING|LIMIT|CREATE|TABLE|ALTER|DROP|SET|VALUES|INTO)\b/g, kwColor, false);
+
+  // 4. Special Keywords (this, self, super)
+  apply(/\b(this|self|super)\b/g, specColor, false);
+
+  // 5. Types & Classes (primitives + PascalCase identifier names)
+  apply(/\b(int|float|double|char|bool|boolean|void|string|number|any|unknown|never|byte|short|long|unsigned|object|symbol|bigint)\b/g, typeColor, false);
+  apply(/\b([A-Z][a-zA-Z0-9_$]*)\b/g, typeColor, false);
+
+  // 6. Function / Method calls & headers
+  apply(/\b([a-zA-Z_$][\w$]*)\s*(?=\()/g, fnColor, true);
+  apply(/\b([a-zA-Z_$][\w$]*)\s*(?=:\s*$)/g, fnColor, true);
+
+  // 7. Booleans & Constants
+  apply(/\b(true|false|null|undefined|nil|None|True|False|NaN|Infinity)\b/g, boolColor, false);
+  apply(/\b([A-Z_][A-Z0-9_]{2,})\b/g, boolColor, false);
+
+  // 8. Numbers (hex, binary, float, integer)
+  apply(/\b(0x[0-9a-fA-F]+|0b[01]+|\d+(\.\d+)?([eE][+-]?\d+)?)\b/g, numColor, false);
+
+  // 9. Operators
+  apply(/(=>|===|!==|==|!=|<=|>=|&&|\|\||\+\+|--|\+=|-=|\*=|\/=|%=|\+|-|\*|\/|%|=|->)/g, opColor, false);
 }
 
 function saveUserPreferences(prefs) {
@@ -1261,10 +1570,12 @@ function getUserPreferences() {
     bgColor: '#F6F8FA',
     textColor: '#24292F',
     borderColor: '#D0D7DE',
-    keywordColor: '#0550AE',
+    keywordColor: '#CF222E',
     stringColor: '#0A3069',
     commentColor: '#6E7781',
-    numberColor: '#953800'
+    numberColor: '#0550AE',
+    functionColor: '#8250DF',
+    typeColor: '#953800'
   }, prefs || {});
 }
 
@@ -1334,8 +1645,13 @@ function quickUndoDocumentTypography() {
  * 3. Typography -> Title, Heading 1, Sub-headings (H2, H3), and Body text with inline code highlights
  */
 function quickSmartAutoFormatDocument() {
-  const result = smartAutoFormatEntireDocument();
-  DocumentApp.getUi().alert('🚀 Smart Auto-Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+  try {
+    const result = smartAutoFormatEntireDocument();
+    DocumentApp.getUi().alert('🚀 Smart Auto-Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+  } catch (err) {
+    Logger.log('quickSmartAutoFormatDocument error: ' + err);
+    DocumentApp.getUi().alert('⚠️ Smart Auto-Formatter', 'An error occurred during formatting: ' + (err.message || err.toString()), DocumentApp.getUi().ButtonSet.OK);
+  }
 }
 
 function smartAutoFormatEntireDocument(codeOptions, tableOptions, typoOptions) {
@@ -1343,19 +1659,41 @@ function smartAutoFormatEntireDocument(codeOptions, tableOptions, typoOptions) {
   tableOptions = tableOptions || getTablePreferences();
   typoOptions = typoOptions || getTypographyPreferences();
 
-  // 1. Format code blocks first (extracts them into table containers so typography ignores them)
-  const codeResult = highlightAllCodeBlocks(codeOptions);
+  // 1. Remove all bookmarks from the document
+  try {
+    removeAllBookmarks();
+  } catch(e) {
+    Logger.log('removeAllBookmarks error: ' + e);
+  }
 
-  // 2. Format and center all data tables (code block tables are centered without losing syntax styles)
-  const tableResult = formatAllDocumentTables(tableOptions);
+  // 2. Format code blocks first (extracts them into table containers so typography ignores them)
+  let codeResult = null;
+  try {
+    codeResult = highlightAllCodeBlocks(codeOptions);
+  } catch(e) {
+    Logger.log('highlightAllCodeBlocks error: ' + e);
+  }
 
-  // 3. Auto-detect and format all typography (Title, H1, Subheadings, Body, inline code)
-  const typoResult = formatDocumentTypography(typoOptions);
+  // 3. Format and center all data tables (code block tables are centered without losing syntax styles)
+  let tableResult = null;
+  try {
+    tableResult = formatAllDocumentTables(tableOptions);
+  } catch(e) {
+    Logger.log('formatAllDocumentTables error: ' + e);
+  }
+
+  // 4. Auto-detect and format all typography (Title, H1, Subheadings, Body, inline code)
+  let typoResult = null;
+  try {
+    typoResult = formatDocumentTypography(typoOptions);
+  } catch(e) {
+    Logger.log('formatDocumentTypography error: ' + e);
+  }
 
   const summary = [];
   if (codeResult && codeResult.count > 0) summary.push(codeResult.count + ' code block(s) formatted');
   if (tableResult && tableResult.count > 0) summary.push(tableResult.count + ' table(s) aligned & styled');
-  if (typoResult && typoResult.count > 0) summary.push(typoResult.message);
+  if (typoResult && typoResult.count > 0) summary.push(typoResult.message || 'Typography formatted');
 
   const message = summary.length > 0
     ? '🚀 Smart Auto-Format Complete!\n\n• ' + summary.join('\n• ')
@@ -1367,6 +1705,476 @@ function smartAutoFormatEntireDocument(codeOptions, tableOptions, typoOptions) {
     tableResult: tableResult,
     typoResult: typoResult,
     message: message
+  };
+}
+
+/**
+ * Removes all bookmark annotations from the active document.
+ * Bookmarks in Google Docs are named anchors shown as blue flags in the margin.
+ */
+function removeAllBookmarks() {
+  try {
+    const doc = DocumentApp.getActiveDocument();
+    const bookmarks = doc.getBookmarks();
+    for (let i = 0; i < bookmarks.length; i++) {
+      try { bookmarks[i].remove(); } catch(e) {}
+    }
+    return { success: true, count: bookmarks.length };
+  } catch(e) {
+    return { success: false, count: 0, error: e.toString() };
+  }
+}
+
+/* ==========================================================================
+   TEXT CLEANUP, SPACING & INLINE FORMATTING ENGINE
+   ========================================================================== */
+
+/**
+ * Quick menu wrappers
+ */
+function quickCleanupDocumentText() {
+  const result = cleanupDocumentText({ smartTypography: true, stripDoubleSpaces: true, normalizeBlankLines: true });
+  DocumentApp.getUi().alert('🧹 Text Cleanup', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+function quickNormalizeDocumentSpacing() {
+  const result = normalizeDocumentSpacing({ headingSpacingBefore: 14, headingSpacingAfter: 4, bodySpacingAfter: 6, keepHeadingsWithNext: true });
+  DocumentApp.getUi().alert('📐 Spacing Normalizer', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+function quickApplyInlineMarkdown() {
+  const result = applyInlineMarkdown();
+  DocumentApp.getUi().alert('✦ Inline Markdown', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+function quickApplyHeadingNumbers() {
+  const result = applyHeadingNumbers();
+  DocumentApp.getUi().alert('🔢 Heading Numbers', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+function quickConvertMarkdownLists() {
+  const result = convertMarkdownLists();
+  DocumentApp.getUi().alert('📋 List Converter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+function quickHeadingsToUpperCase() {
+  const result = transformHeadingCase('upper');
+  DocumentApp.getUi().alert('🔡 Heading Case', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+function quickHeadingsToTitleCase() {
+  const result = transformHeadingCase('title');
+  DocumentApp.getUi().alert('🔡 Heading Case', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Cleans up document text:
+ *  - Collapses multiple spaces within paragraphs
+ *  - Strips trailing whitespace from each line
+ *  - Normalizes consecutive blank paragraphs to at most 2
+ *  - Smart typography: straight quotes → curly, -- → —, ... → …
+ */
+function cleanupDocumentText(options) {
+  options = options || {};
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  let fixedParas = 0;
+  let fixedChars = 0;
+
+  const numChildren = body.getNumChildren();
+  let prevWasBlank = false;
+  let blankStreak = 0;
+  const toRemove = [];
+
+  for (let i = 0; i < numChildren; i++) {
+    const child = body.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) {
+      prevWasBlank = false;
+      blankStreak = 0;
+      continue;
+    }
+    const p = child.asParagraph();
+    // Skip paragraphs inside table cells
+    if (p.getParent() && p.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) continue;
+
+    let text = p.getText();
+    const trimmed = text.trim();
+    const isEmpty = trimmed.length === 0;
+
+    // Track blank line streaks for normalization
+    if (isEmpty) {
+      blankStreak++;
+      if (options.normalizeBlankLines && blankStreak > 2) {
+        toRemove.push(p);
+      }
+      continue;
+    } else {
+      blankStreak = 0;
+    }
+
+    let newText = text;
+
+    // Strip double (or more) spaces within a line
+    if (options.stripDoubleSpaces) {
+      newText = newText.replace(/  +/g, ' ');
+    }
+
+    // Strip trailing whitespace
+    newText = newText.replace(/\s+$/, '');
+
+    // Smart typography substitutions
+    if (options.smartTypography) {
+      // Em dash: ' -- ' or '--' → ' — '
+      newText = newText.replace(/ -- /g, ' \u2014 ').replace(/--/g, '\u2014');
+      // Ellipsis: ... → …
+      newText = newText.replace(/\.\.\./g, '\u2026');
+      // Curly double quotes
+      newText = newText.replace(/(^|[\s([{])"(\S)/g, '$1\u201C$2');
+      newText = newText.replace(/(\S)"([\s)\]}.!?,;:]|$)/g, '$1\u201D$2');
+      // Curly single quotes / apostrophes
+      newText = newText.replace(/(\w)'(\w)/g, '$1\u2019$2'); // contractions
+      newText = newText.replace(/(^|[\s([{])'(\S)/g, '$1\u2018$2');
+      newText = newText.replace(/(\S)'([\s)\]}.!?,;:]|$)/g, '$1\u2019$2');
+    }
+
+    if (newText !== text) {
+      p.setText(newText);
+      fixedParas++;
+      fixedChars += Math.abs(newText.length - text.length);
+    }
+  }
+
+  // Remove excess blank paragraphs (bottom-up to preserve indices)
+  for (let i = toRemove.length - 1; i >= 0; i--) {
+    try { toRemove[i].removeFromParent(); } catch(e) {}
+  }
+
+  const msg = [];
+  if (fixedParas > 0) msg.push(fixedParas + ' paragraph(s) cleaned');
+  if (toRemove.length > 0) msg.push(toRemove.length + ' excess blank line(s) removed');
+
+  return {
+    success: true,
+    fixedParas: fixedParas,
+    removedBlanks: toRemove.length,
+    message: msg.length > 0 ? '🧹 ' + msg.join(', ') + '.' : '✓ Document text is already clean.'
+  };
+}
+
+/**
+ * Normalizes paragraph spacing across the entire document:
+ *  - Sets spacingBefore/After on headings
+ *  - Sets spacingAfter on body paragraphs
+ *  - Sets keepWithNext=true on all headings so they don't orphan at page breaks
+ *  - Sets keepTogether=true on headings
+ */
+function normalizeDocumentSpacing(options) {
+  options = options || {};
+  const hBefore = options.headingSpacingBefore !== undefined ? options.headingSpacingBefore : 14;
+  const hAfter  = options.headingSpacingAfter  !== undefined ? options.headingSpacingAfter  : 4;
+  const bAfter  = options.bodySpacingAfter     !== undefined ? options.bodySpacingAfter     : 6;
+  const keepWithNext = options.keepHeadingsWithNext !== false;
+
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  const PH = DocumentApp.ParagraphHeading;
+  let count = 0;
+
+  const numChildren = body.getNumChildren();
+  for (let i = 0; i < numChildren; i++) {
+    const child = body.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
+    const p = child.asParagraph();
+    if (p.getParent() && p.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) continue;
+
+    const heading = p.getHeading();
+    const isHeading = heading === PH.TITLE || heading === PH.SUBTITLE ||
+                      heading === PH.HEADING1 || heading === PH.HEADING2 ||
+                      heading === PH.HEADING3 || heading === PH.HEADING4 ||
+                      heading === PH.HEADING5 || heading === PH.HEADING6;
+    try {
+      if (isHeading) {
+        p.setSpacingBefore(hBefore);
+        p.setSpacingAfter(hAfter);
+        if (keepWithNext) {
+          try { p.setKeepWithNext(true); } catch(e) {}
+        }
+        try { p.setKeepTogether(true); } catch(e) {}
+      } else if (heading === PH.NORMAL) {
+        if (p.getText().trim().length > 0) {
+          p.setSpacingAfter(bAfter);
+        }
+      }
+      count++;
+    } catch(e) {}
+  }
+
+  return {
+    success: true,
+    count: count,
+    message: '📐 Spacing normalized for ' + count + ' paragraph(s). Headings pinned to next paragraph.'
+  };
+}
+
+/**
+ * Parses inline Markdown syntax in all body paragraphs and applies
+ * the corresponding text formatting using Apps Script text ranges:
+ *   **bold**          → setBold
+ *   *italic*          → setItalic (also _italic_)
+ *   ~~strikethrough~~ → setStrikethrough
+ *   ==highlight==     → setBackgroundColor('#FFFF00')
+ * Strips the markdown markers from the text after applying formatting.
+ */
+function applyInlineMarkdown(options) {
+  options = options || {};
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  let count = 0;
+
+  const numChildren = body.getNumChildren();
+  for (let i = 0; i < numChildren; i++) {
+    const child = body.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
+    const p = child.asParagraph();
+    if (p.getParent() && p.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) continue;
+
+    if (applyMarkdownToParagraph(p)) count++;
+  }
+
+  return {
+    success: true,
+    count: count,
+    message: count > 0
+      ? '✦ Inline markdown applied to ' + count + ' paragraph(s).'
+      : '✓ No inline markdown markers found.'
+  };
+}
+
+/**
+ * Applies markdown formatting to a single paragraph.
+ * Returns true if any changes were made.
+ */
+function applyMarkdownToParagraph(p) {
+  const raw = p.getText();
+  if (!raw || raw.length === 0) return false;
+
+  // Ordered list of patterns: [ regex, formatFn, markerLength ]
+  // We repeatedly scan because applying one pattern shifts character indices.
+  const PATTERNS = [
+    // ~~strikethrough~~ (must come before *italic*)
+    { re: /~~([^~]+)~~/, apply: function(t, s, e) { t.setStrikethrough(s, e, true); }, marker: 2 },
+    // ==highlight==
+    { re: /==([^=]+)==/, apply: function(t, s, e) { t.setBackgroundColor(s, e, '#FFFF00'); }, marker: 2 },
+    // **bold**
+    { re: /\*\*([^*]+)\*\*/, apply: function(t, s, e) { t.setBold(s, e, true); }, marker: 2 },
+    // *italic* or _italic_
+    { re: /\*([^*]+)\*|_([^_]+)_/, apply: function(t, s, e) { t.setItalic(s, e, true); }, marker: 1 }
+  ];
+
+  let changed = false;
+  for (let pi = 0; pi < PATTERNS.length; pi++) {
+    const pat = PATTERNS[pi];
+    let text = p.getText();
+    let match;
+    // Use a loop to handle multiple occurrences in this paragraph
+    while ((match = pat.re.exec(text)) !== null) {
+      const fullMatch = match[0];
+      const inner = match[1] || match[2];
+      const startFull = match.index;
+      const mk = pat.marker;
+      // Content spans from startFull+mk to startFull+mk+inner.length-1
+      const contentStart = startFull + mk;
+      const contentEnd   = startFull + mk + inner.length - 1;
+
+      // Build new text without the markers
+      const before = text.substring(0, startFull);
+      const after  = text.substring(startFull + fullMatch.length);
+      const newText = before + inner + after;
+      p.setText(newText);
+
+      // Apply formatting to the content range in the new text
+      try {
+        const textObj = p.editAsText();
+        pat.apply(textObj, contentStart, contentStart + inner.length - 1);
+      } catch(e) {}
+
+      changed = true;
+      // Re-read text for next iteration
+      text = p.getText();
+    }
+  }
+  return changed;
+}
+
+/**
+ * Auto-numbers all headings in the document using outline numbering:
+ *   Heading1 → 1.  2.  3.
+ *   Heading2 → 1.1  1.2  2.1
+ *   Heading3 → 1.1.1  1.1.2  1.2.1
+ * Strips any existing leading numbering before re-applying.
+ */
+function applyHeadingNumbers(options) {
+  options = options || {};
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  const PH = DocumentApp.ParagraphHeading;
+
+  let counters = [0, 0, 0]; // H1, H2, H3
+  let count = 0;
+
+  const numChildren = body.getNumChildren();
+  for (let i = 0; i < numChildren; i++) {
+    const child = body.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
+    const p = child.asParagraph();
+    if (p.getParent() && p.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) continue;
+
+    const heading = p.getHeading();
+    let level = -1;
+    if (heading === PH.HEADING1) level = 0;
+    else if (heading === PH.HEADING2) level = 1;
+    else if (heading === PH.HEADING3) level = 2;
+    if (level < 0) continue;
+
+    counters[level]++;
+    // Reset deeper levels
+    for (let c = level + 1; c < counters.length; c++) counters[c] = 0;
+
+    const prefix = level === 0
+      ? counters[0] + '.'
+      : level === 1
+        ? counters[0] + '.' + counters[1]
+        : counters[0] + '.' + counters[1] + '.' + counters[2];
+
+    // Strip existing leading number pattern
+    let text = p.getText().replace(/^\d+(\.\d+)*\.?\s+/, '').trim();
+    p.setText(prefix + '  ' + text);
+    count++;
+  }
+
+  return {
+    success: true,
+    count: count,
+    message: count > 0
+      ? '🔢 Numbered ' + count + ' heading(s) with outline numbering.'
+      : '✓ No headings found to number.'
+  };
+}
+
+/**
+ * Transforms heading text case across the document.
+ * @param {string} caseType - 'upper', 'lower', 'title', or 'sentence'
+ */
+function transformHeadingCase(caseType) {
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  const PH = DocumentApp.ParagraphHeading;
+  let count = 0;
+
+  const numChildren = body.getNumChildren();
+  for (let i = 0; i < numChildren; i++) {
+    const child = body.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
+    const p = child.asParagraph();
+    if (p.getParent() && p.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) continue;
+
+    const heading = p.getHeading();
+    const isHeading = heading === PH.TITLE || heading === PH.HEADING1 ||
+                      heading === PH.HEADING2 || heading === PH.HEADING3 ||
+                      heading === PH.HEADING4 || heading === PH.HEADING5 ||
+                      heading === PH.HEADING6;
+    if (!isHeading) continue;
+
+    const text = p.getText();
+    if (!text || text.trim().length === 0) continue;
+
+    let newText;
+    switch (caseType) {
+      case 'upper':
+        newText = text.toUpperCase();
+        break;
+      case 'lower':
+        newText = text.toLowerCase();
+        break;
+      case 'title':
+        newText = text.replace(/\w\S*/g, function(w) {
+          // Lowercase small words unless first word
+          const small = /^(a|an|the|and|but|or|for|nor|on|at|to|by|in|of|up|as|is|it)$/i;
+          return small.test(w) ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.substr(1).toLowerCase();
+        });
+        // Always capitalize first word
+        newText = newText.charAt(0).toUpperCase() + newText.slice(1);
+        break;
+      case 'sentence':
+        newText = text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+        break;
+      default:
+        newText = text;
+    }
+
+    if (newText !== text) {
+      p.setText(newText);
+      count++;
+    }
+  }
+
+  return {
+    success: true,
+    count: count,
+    message: count > 0
+      ? '🔡 Applied ' + caseType + ' case to ' + count + ' heading(s).'
+      : '✓ No heading text changed.'
+  };
+}
+
+/**
+ * Converts plain-text markdown-style list items into proper Google Docs
+ * ListItem elements with bullet styling.
+ * Detects lines starting with: - , • , * , or 1. 2. 3. (ordered)
+ */
+function convertMarkdownLists() {
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  let converted = 0;
+
+  // We iterate via index because convertToListItem may change the DOM
+  let i = 0;
+  while (i < body.getNumChildren()) {
+    const child = body.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) { i++; continue; }
+    const p = child.asParagraph();
+    if (p.getParent() && p.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) { i++; continue; }
+
+    const text = p.getText();
+    const unordered = /^[-•*]\s+(.+)$/.exec(text);
+    const ordered   = /^\d+\.\s+(.+)$/.exec(text);
+
+    if (unordered || ordered) {
+      const inner = (unordered || ordered)[1];
+      try {
+        // Replace text then convert to list item
+        p.setText(inner);
+        p.setGlyphType(unordered
+          ? DocumentApp.GlyphType.BULLET
+          : DocumentApp.GlyphType.NUMBER);
+        converted++;
+      } catch(e) {
+        // setGlyphType not available; fall back to re-inserting as ListItem
+        try {
+          const idx = body.getChildIndex(p);
+          const li = body.insertListItem(idx, inner);
+          li.setGlyphType(unordered
+            ? DocumentApp.GlyphType.BULLET
+            : DocumentApp.GlyphType.NUMBER);
+          li.setNestingLevel(0);
+          p.removeFromParent();
+          converted++;
+        } catch(e2) {}
+      }
+    }
+    i++;
+  }
+
+  return {
+    success: true,
+    count: converted,
+    message: converted > 0
+      ? '📋 Converted ' + converted + ' plain-text list item(s) to proper document lists.'
+      : '✓ No markdown list items found.'
   };
 }
 
@@ -2523,7 +3331,7 @@ function getSidebarHtml() {
       <body>
 
         <!-- Master 1-Click Smart Auto-Formatter Card -->
-        <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; color: #ffffff; text-align: center; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">
+        <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; color: #ffffff; text-align: center; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">
           <div style="font-weight: 700; font-size: 13px; margin-bottom: 2px; display:flex; align-items:center; justify-content:center; gap:6px;">
             <span>🚀</span> Smart Auto-Format
           </div>
@@ -2536,16 +3344,27 @@ function getSidebarHtml() {
           <div id="smartAutoStatus" class="status-box" style="display:none; margin-top: 8px; text-align: left; background:#ffffff; color:#1e293b;"></div>
         </div>
 
-        <!-- Navigation Tabs -->
-        <div class="tab-header">
-          <button class="tab-btn active" id="tabBtnTypography" onclick="switchTab('typography')">
-            <span>✍️</span> Typography
+        <!-- Remove Bookmarks utility row -->
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:12px;">
+          <button id="btnRemoveBookmarks" onclick="runRemoveBookmarks()" style="flex:1; border:1px solid #cbd5e1; background:#f8fafc; color:#334155; font-size:11px; font-weight:600; padding:6px 10px; border-radius:6px; cursor:pointer; transition: all 0.2s ease;" title="Remove all bookmark flags from the document">
+            🔖 Remove All Bookmarks
           </button>
-          <button class="tab-btn" id="tabBtnTables" onclick="switchTab('tables')">
+          <div id="bookmarkStatus" style="font-size:10px; color:#64748b; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="tab-header" style="display:grid; grid-template-columns: repeat(4,1fr); gap:2px;">
+          <button class="tab-btn active" id="tabBtnTypography" onclick="switchTab('typography')" style="font-size:10px; padding:5px 2px;">
+            <span>✍️</span> Typo
+          </button>
+          <button class="tab-btn" id="tabBtnTables" onclick="switchTab('tables')" style="font-size:10px; padding:5px 2px;">
             <span>📊</span> Tables
           </button>
-          <button class="tab-btn" id="tabBtnCode" onclick="switchTab('code')">
-            <span>⚡</span> Code Blocks
+          <button class="tab-btn" id="tabBtnCode" onclick="switchTab('code')" style="font-size:10px; padding:5px 2px;">
+            <span>⚡</span> Code
+          </button>
+          <button class="tab-btn" id="tabBtnCleanup" onclick="switchTab('cleanup')" style="font-size:10px; padding:5px 2px;">
+            <span>✨</span> Cleanup
           </button>
         </div>
 
@@ -3092,6 +3911,7 @@ function getSidebarHtml() {
             <label>Theme Preset</label>
             <select id="codeThemeSelect" onchange="onCodeThemeChange()">
               <option value="github-light">GitHub Light</option>
+              <option value="one-dark">One Dark Pro (VS Code)</option>
               <option value="dracula">Dracula Dark</option>
               <option value="monokai">Monokai Dark</option>
               <option value="solarized-light">Solarized Light</option>
@@ -3171,6 +3991,14 @@ function getSidebarHtml() {
               <input type="color" id="cKwColor" value="${codePrefs.keywordColor || '#CF222E'}" onchange="setCodeCustomMode()">
             </div>
             <div class="color-row">
+              <label>Functions & Methods <small style="opacity:.65">(calculateTotal, run…)</small>:</label>
+              <input type="color" id="cFnColor" value="${codePrefs.functionColor || '#8250DF'}" onchange="setCodeCustomMode()">
+            </div>
+            <div class="color-row">
+              <label>Types & Classes <small style="opacity:.65">(Invoice, String…)</small>:</label>
+              <input type="color" id="cTypeColor" value="${codePrefs.typeColor || '#953800'}" onchange="setCodeCustomMode()">
+            </div>
+            <div class="color-row">
               <label>Strings <small style="opacity:.65">("text", 'value')</small>:</label>
               <input type="color" id="cStrColor" value="${codePrefs.stringColor || '#0A3069'}" onchange="setCodeCustomMode()">
             </div>
@@ -3180,7 +4008,7 @@ function getSidebarHtml() {
             </div>
             <div class="color-row">
               <label>Numbers <small style="opacity:.65">(42, 3.14)</small>:</label>
-              <input type="color" id="cNumColor" value="${codePrefs.numberColor || '#953800'}" onchange="setCodeCustomMode()">
+              <input type="color" id="cNumColor" value="${codePrefs.numberColor || '#0550AE'}" onchange="setCodeCustomMode()">
             </div>
           </div>
 
@@ -3218,15 +4046,249 @@ function getSidebarHtml() {
           <div id="codeStatus" class="status-box"></div>
         </div>
 
+        <!-- ==========================================
+             TAB 4: ✨ TEXT CLEANUP & SPACING
+             ========================================== -->
+        <div id="tabContentCleanup" class="tab-content">
+
+          <div class="info-badge">
+            ✓ <strong>Text Cleanup:</strong> Whitespace, smart quotes, em-dashes<br>
+            ✓ <strong>Spacing:</strong> Before/after headings, keep-with-next<br>
+            ✓ <strong>Inline Markdown:</strong> **bold**, *italic*, ~~strike~~, ==highlight==<br>
+            ✓ <strong>Heading Numbers:</strong> 1. / 1.1 / 1.1.1 auto-outline
+          </div>
+
+          <!-- Text Cleanup Card -->
+          <div class="typo-card">
+            <div class="typo-card-header"><span class="typo-card-title">🧹 Text Cleanup</span></div>
+            <div style="padding:8px 10px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:6px;">
+                <input type="checkbox" id="cleanSmartTypo" checked>
+                Smart typography (curly quotes, em-dash, ellipsis)
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:6px;">
+                <input type="checkbox" id="cleanDoubleSpaces" checked>
+                Strip double spaces
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:10px;">
+                <input type="checkbox" id="cleanBlankLines" checked>
+                Normalize excessive blank lines (max 2)
+              </label>
+              <button class="btn-primary" id="btnCleanupText" onclick="runCleanupText()" style="margin-top:0;">
+                🧹 Run Text Cleanup
+              </button>
+            </div>
+          </div>
+
+          <!-- Paragraph Spacing Card -->
+          <div class="typo-card">
+            <div class="typo-card-header"><span class="typo-card-title">📐 Paragraph Spacing</span></div>
+            <div style="padding:8px 10px;">
+              <div class="row-2col">
+                <div class="control-group" style="margin:0;">
+                  <label>Space Before Heading (pt)</label>
+                  <input type="number" id="spacingHBefore" value="14" min="0" max="72" style="width:100%;">
+                </div>
+                <div class="control-group" style="margin:0;">
+                  <label>Space After Heading (pt)</label>
+                  <input type="number" id="spacingHAfter" value="4" min="0" max="72" style="width:100%;">
+                </div>
+              </div>
+              <div class="control-group" style="margin-top:6px;">
+                <label>Space After Body Paragraph (pt)</label>
+                <input type="number" id="spacingBodyAfter" value="6" min="0" max="72" style="width:100%;">
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:10px;">
+                <input type="checkbox" id="spacingKeepWithNext" checked>
+                Pin headings to next paragraph (prevent orphans)
+              </label>
+              <button class="btn-primary" id="btnNormalizeSpacing" onclick="runNormalizeSpacing()" style="margin-top:0;">
+                📐 Normalize Paragraph Spacing
+              </button>
+            </div>
+          </div>
+
+          <!-- Inline Markdown Card -->
+          <div class="typo-card">
+            <div class="typo-card-header"><span class="typo-card-title">✦ Inline Markdown Formatter</span></div>
+            <div style="padding:8px 10px;">
+              <div class="info-badge" style="margin-bottom:8px; font-size:10px;">
+                <strong>**bold**</strong> &nbsp;·&nbsp; <em>*italic*</em> &nbsp;·&nbsp;
+                <span style="text-decoration:line-through;">~~strike~~</span> &nbsp;·&nbsp;
+                <span style="background:#ffff00;">==highlight==</span>
+              </div>
+              <button class="btn-primary" id="btnInlineMarkdown" onclick="runInlineMarkdown()" style="margin-top:0;">
+                ✦ Apply Inline Markdown Formatting
+              </button>
+            </div>
+          </div>
+
+          <!-- Heading Numbers Card -->
+          <div class="typo-card">
+            <div class="typo-card-header"><span class="typo-card-title">🔢 Heading Numbering</span></div>
+            <div style="padding:8px 10px;">
+              <div class="info-badge" style="margin-bottom:8px; font-size:10px;">
+                H1 → 1.&nbsp;&nbsp; H2 → 1.1&nbsp;&nbsp; H3 → 1.1.1
+              </div>
+              <button class="btn-primary" id="btnHeadingNumbers" onclick="runHeadingNumbers()" style="margin-top:0;margin-bottom:6px;">
+                🔢 Auto-Number Headings
+              </button>
+            </div>
+          </div>
+
+          <!-- Heading Case Card -->
+          <div class="typo-card">
+            <div class="typo-card-header"><span class="typo-card-title">🔡 Heading Case Transform</span></div>
+            <div style="padding:8px 10px;">
+              <div class="row-2col">
+                <button class="btn-secondary" style="margin-top:0;" onclick="runHeadingCase('upper')">UPPERCASE</button>
+                <button class="btn-secondary" style="margin-top:0;" onclick="runHeadingCase('title')">Title Case</button>
+              </div>
+              <div class="row-2col" style="margin-top:4px;">
+                <button class="btn-secondary" style="margin-top:0;" onclick="runHeadingCase('sentence')">Sentence case</button>
+                <button class="btn-secondary" style="margin-top:0;" onclick="runHeadingCase('lower')">lowercase</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- List Converter Card -->
+          <div class="typo-card">
+            <div class="typo-card-header"><span class="typo-card-title">📋 Markdown List Converter</span></div>
+            <div style="padding:8px 10px;">
+              <div class="info-badge" style="margin-bottom:8px;font-size:10px;">
+                Converts <code>- item</code>, <code>• item</code>, <code>* item</code>, <code>1. item</code>
+                lines into proper Google Docs list items.
+              </div>
+              <button class="btn-primary" id="btnConvertLists" onclick="runConvertLists()" style="margin-top:0;">
+                📋 Convert Markdown Lists
+              </button>
+            </div>
+          </div>
+
+          <div id="cleanupStatus" class="status-box"></div>
+        </div>
+
         <script>
           /* Tab Switching */
           function switchTab(tab) {
             document.getElementById('tabBtnTypography').classList.toggle('active', tab === 'typography');
             document.getElementById('tabBtnTables').classList.toggle('active', tab === 'tables');
             document.getElementById('tabBtnCode').classList.toggle('active', tab === 'code');
+            document.getElementById('tabBtnCleanup').classList.toggle('active', tab === 'cleanup');
             document.getElementById('tabContentTypography').classList.toggle('active', tab === 'typography');
             document.getElementById('tabContentTables').classList.toggle('active', tab === 'tables');
             document.getElementById('tabContentCode').classList.toggle('active', tab === 'code');
+            document.getElementById('tabContentCleanup').classList.toggle('active', tab === 'cleanup');
+          }
+
+          /* =========================================================
+             CLEANUP TAB LOGIC
+             ========================================================= */
+          function setCleanupStatus(msg, type) {
+            const el = document.getElementById('cleanupStatus');
+            if (!el) return;
+            el.style.display = msg ? 'block' : 'none';
+            el.className = 'status-box' + (type ? ' ' + type : '');
+            el.innerText = msg || '';
+          }
+
+          function runCleanupText() {
+            setCleanupStatus('Cleaning up text...', 'loading');
+            const btn = document.getElementById('btnCleanupText');
+            if (btn) btn.disabled = true;
+            const opts = {
+              smartTypography: document.getElementById('cleanSmartTypo').checked,
+              stripDoubleSpaces: document.getElementById('cleanDoubleSpaces').checked,
+              normalizeBlankLines: document.getElementById('cleanBlankLines').checked
+            };
+            google.script.run
+              .withSuccessHandler(res => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus('Error: ' + err, 'error');
+              })
+              .cleanupDocumentText(opts);
+          }
+
+          function runNormalizeSpacing() {
+            setCleanupStatus('Normalizing paragraph spacing...', 'loading');
+            const btn = document.getElementById('btnNormalizeSpacing');
+            if (btn) btn.disabled = true;
+            const opts = {
+              headingSpacingBefore: Number(document.getElementById('spacingHBefore').value) || 14,
+              headingSpacingAfter:  Number(document.getElementById('spacingHAfter').value)  || 4,
+              bodySpacingAfter:     Number(document.getElementById('spacingBodyAfter').value) || 6,
+              keepHeadingsWithNext: document.getElementById('spacingKeepWithNext').checked
+            };
+            google.script.run
+              .withSuccessHandler(res => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus('Error: ' + err, 'error');
+              })
+              .normalizeDocumentSpacing(opts);
+          }
+
+          function runInlineMarkdown() {
+            setCleanupStatus('Applying inline markdown formatting...', 'loading');
+            const btn = document.getElementById('btnInlineMarkdown');
+            if (btn) btn.disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus('Error: ' + err, 'error');
+              })
+              .applyInlineMarkdown();
+          }
+
+          function runHeadingNumbers() {
+            setCleanupStatus('Auto-numbering headings...', 'loading');
+            const btn = document.getElementById('btnHeadingNumbers');
+            if (btn) btn.disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus('Error: ' + err, 'error');
+              })
+              .applyHeadingNumbers();
+          }
+
+          function runHeadingCase(caseType) {
+            setCleanupStatus('Applying ' + caseType + ' case to headings...', 'loading');
+            google.script.run
+              .withSuccessHandler(res => setCleanupStatus(res.message, res.success ? 'success' : 'error'))
+              .withFailureHandler(err => setCleanupStatus('Error: ' + err, 'error'))
+              .transformHeadingCase(caseType);
+          }
+
+          function runConvertLists() {
+            setCleanupStatus('Converting markdown lists...', 'loading');
+            const btn = document.getElementById('btnConvertLists');
+            if (btn) btn.disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                if (btn) btn.disabled = false;
+                setCleanupStatus('Error: ' + err, 'error');
+              })
+              .convertMarkdownLists();
           }
 
           /* =========================================================
@@ -3544,6 +4606,27 @@ function getSidebarHtml() {
               .smartAutoFormatEntireDocument(getCodeOptions(), getTableOptions(), getTypographyOptions());
           }
 
+          function runRemoveBookmarks() {
+            const statusEl = document.getElementById('bookmarkStatus');
+            const btn = document.getElementById('btnRemoveBookmarks');
+            if (btn) btn.disabled = true;
+            if (statusEl) statusEl.innerText = 'Removing...';
+            google.script.run
+              .withSuccessHandler(res => {
+                if (btn) btn.disabled = false;
+                if (statusEl) {
+                  statusEl.innerText = res.count > 0
+                    ? '✓ Removed ' + res.count + ' bookmark(s)'
+                    : '✓ No bookmarks found';
+                }
+              })
+              .withFailureHandler(err => {
+                if (btn) btn.disabled = false;
+                if (statusEl) statusEl.innerText = '✗ Error: ' + err;
+              })
+              .removeAllBookmarks();
+          }
+
           function runFormatDocumentTypography() {
             setTypographyStatus('Formatting document typography...', 'loading');
             document.getElementById('btnFormatDocTypo').disabled = true;
@@ -3827,10 +4910,31 @@ function getSidebarHtml() {
              CODE HIGHLIGHTER LOGIC
              ========================================================= */
           const CODE_THEMES = {
-            'github-light': { bg: '#F6F8FA', text: '#24292F', border: '#D0D7DE', kw: '#CF222E', str: '#0A3069', com: '#6E7781', num: '#953800' },
-            'dracula':      { bg: '#282A36', text: '#F8F8F2', border: '#44475A', kw: '#FF79C6', str: '#F1FA8C', com: '#6272A4', num: '#BD93F9' },
-            'monokai':      { bg: '#272822', text: '#F8F8F2', border: '#3E3D32', kw: '#F92672', str: '#E6DB74', com: '#75715E', num: '#AE81FF' },
-            'solarized-light': { bg: '#FDF6E3', text: '#657B83', border: '#EEE8D5', kw: '#268BD2', str: '#2AA198', com: '#93A1A1', num: '#D33682' }
+            'github-light': {
+              bg: '#F6F8FA', text: '#24292F', border: '#D0D7DE',
+              kw: '#CF222E', str: '#0A3069', com: '#6E7781', num: '#0550AE',
+              fn: '#8250DF', type: '#953800'
+            },
+            'one-dark': {
+              bg: '#21252B', text: '#ABB2BF', border: '#3B4048',
+              kw: '#C678DD', str: '#98C379', com: '#5C6370', num: '#D19A66',
+              fn: '#61AFEF', type: '#E5C07B'
+            },
+            'dracula': {
+              bg: '#282A36', text: '#F8F8F2', border: '#44475A',
+              kw: '#FF79C6', str: '#F1FA8C', com: '#6272A4', num: '#BD93F9',
+              fn: '#50FA7B', type: '#8BE9FD'
+            },
+            'monokai': {
+              bg: '#272822', text: '#F8F8F2', border: '#3E3D32',
+              kw: '#F92672', str: '#E6DB74', com: '#75715E', num: '#AE81FF',
+              fn: '#A6E22E', type: '#66D9EF'
+            },
+            'solarized-light': {
+              bg: '#FDF6E3', text: '#657B83', border: '#EEE8D5',
+              kw: '#859900', str: '#2AA198', com: '#93A1A1', num: '#D33682',
+              fn: '#268BD2', type: '#B58900'
+            }
           };
 
           const initialCodeTheme = '${codePrefs.theme || 'github-light'}';
@@ -3850,6 +4954,8 @@ function getSidebarHtml() {
               document.getElementById('cStrColor').value = t.str;
               document.getElementById('cComColor').value = t.com;
               document.getElementById('cNumColor').value = t.num;
+              if (document.getElementById('cFnColor')) document.getElementById('cFnColor').value = t.fn;
+              if (document.getElementById('cTypeColor')) document.getElementById('cTypeColor').value = t.type;
             }
             updateCodePreview();
           }
@@ -3887,6 +4993,9 @@ function getSidebarHtml() {
             document.getElementById('pKw2').style.color = document.getElementById('cKwColor').value;
             document.getElementById('pStr').style.color = document.getElementById('cStrColor').value;
             document.getElementById('pCom').style.color = document.getElementById('cComColor').value;
+            if (document.getElementById('pFn')) {
+              document.getElementById('pFn').style.color = document.getElementById('cFnColor') ? document.getElementById('cFnColor').value : '#8250DF';
+            }
           }
 
           function getCodeOptions() {
@@ -3901,7 +5010,9 @@ function getSidebarHtml() {
               keywordColor: document.getElementById('cKwColor').value,
               stringColor: document.getElementById('cStrColor').value,
               commentColor: document.getElementById('cComColor').value,
-              numberColor: document.getElementById('cNumColor').value
+              numberColor: document.getElementById('cNumColor').value,
+              functionColor: document.getElementById('cFnColor') ? document.getElementById('cFnColor').value : undefined,
+              typeColor: document.getElementById('cTypeColor') ? document.getElementById('cTypeColor').value : undefined
             };
           }
 

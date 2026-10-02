@@ -346,6 +346,9 @@ function isHeadingBannerTable(table) {
   if (isCodeBlockTable(table)) return false;
 
   const cell = row.getCell(0);
+  const bgColor = cell.getBackgroundColor();
+  const hasBg = bgColor && bgColor !== '#ffffff' && bgColor.toLowerCase() !== '#ffffff';
+
   const numChildren = cell.getNumChildren();
   for (let i = 0; i < numChildren; i++) {
     const child = cell.getChild(i);
@@ -356,6 +359,12 @@ function isHeadingBannerTable(table) {
       }
     }
   }
+
+  // 1x1 table with custom background color and 1-3 paragraphs is a heading banner table
+  if (hasBg && numChildren <= 3) {
+    return true;
+  }
+
   return false;
 }
 
@@ -1490,7 +1499,7 @@ function applySyntaxHighlight(textObj, options) {
 
   const kwColor   = options.keywordColor  || themeDef.kw;
   const strColor  = options.stringColor   || themeDef.str;
-  const comColor  = options.commentColor  || themeDef.com;
+  const comColor  = options.commentColor  || themeDef.com || '#6E7781';
   const numColor  = options.numberColor   || themeDef.num;
   const fnColor   = options.functionColor || themeDef.fn || '#8250DF';
   const typeColor = options.typeColor     || themeDef.type || '#953800';
@@ -1498,7 +1507,43 @@ function applySyntaxHighlight(textObj, options) {
   const specColor = options.specialColor  || themeDef.special || kwColor;
   const opColor   = options.operatorColor || themeDef.op || kwColor;
 
+  const trimmed = text.trim();
+
+  // RULE: Code comments must NEVER change color based on code tokens.
+  // Full-line comments are formatted with fixed comment color immediately and exit.
+  if (/^(\/\/|#|--|\/\*|\*|\*\/|"""|'''|rem\b|;)/i.test(trimmed)) {
+    try {
+      textObj.setForegroundColor(0, text.length - 1, comColor);
+    } catch(e) {}
+    return; // Complete immunity: never let any code token recolor any part of a comment!
+  }
+
   const occupied = new Array(text.length).fill(false);
+
+  // 1. Strings and Inline Comments in exact document order
+  // Strings: "...", '...', `...`
+  // Comments: //..., #..., --..., /*...*/
+  const stringOrCommentRegex = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\/\/.*$|#.*$|--.*$|\/\*[\s\S]*?\*\/)/g;
+  let scMatch;
+  while ((scMatch = stringOrCommentRegex.exec(text)) !== null) {
+    if (scMatch[1]) {
+      // String literal
+      const start = scMatch.index;
+      const end = start + scMatch[0].length - 1;
+      for (let i = start; i <= end; i++) occupied[i] = true;
+      try {
+        textObj.setForegroundColor(start, end, strColor);
+      } catch(e) {}
+    } else if (scMatch[2]) {
+      // Inline comment: claims every character up to end of comment/line with fixed comColor
+      const start = scMatch.index;
+      const end = start + scMatch[0].length - 1;
+      for (let i = start; i <= end; i++) occupied[i] = true;
+      try {
+        textObj.setForegroundColor(start, end, comColor);
+      } catch(e) {}
+    }
+  }
 
   function apply(regex, color, useGroup1) {
     if (!color) return;
@@ -1521,34 +1566,28 @@ function applySyntaxHighlight(textObj, options) {
     }
   }
 
-  // 1. Comments (claim entire comment span first to prevent keywords matching inside comments)
-  apply(/(\/\/.*$|#.*$|\/\*[\s\S]*?\*\/)/gm, comColor, false);
-
-  // 2. Strings (claim entire string span next)
-  apply(/(["'`])(?:(?=(\\?))\2[\s\S])*?\1/g, strColor, false);
-
-  // 3. Keywords & Declarations
+  // 2. Keywords & Declarations
   apply(/\b(def|class|function|const|let|var|val|fn|sub|procedure|constructor|method|interface|struct|enum|record|type|alias|namespace|package|import|export|from|as|using|public|private|protected|static|final|abstract|override|readonly|mut|volatile|return|if|else|elif|for|while|do|switch|case|default|break|continue|throw|try|catch|finally|yield|await|async|new|delete|typeof|instanceof|lambda|pass|with|in|is|not|and|or|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|JOIN|INNER|LEFT|RIGHT|ON|GROUP|BY|ORDER|HAVING|LIMIT|CREATE|TABLE|ALTER|DROP|SET|VALUES|INTO)\b/g, kwColor, false);
 
-  // 4. Special Keywords (this, self, super)
+  // 3. Special Keywords (this, self, super)
   apply(/\b(this|self|super)\b/g, specColor, false);
 
-  // 5. Types & Classes (primitives + PascalCase identifier names)
+  // 4. Types & Classes (primitives + PascalCase identifier names)
   apply(/\b(int|float|double|char|bool|boolean|void|string|number|any|unknown|never|byte|short|long|unsigned|object|symbol|bigint)\b/g, typeColor, false);
   apply(/\b([A-Z][a-zA-Z0-9_$]*)\b/g, typeColor, false);
 
-  // 6. Function / Method calls & headers
+  // 5. Function / Method calls & headers
   apply(/\b([a-zA-Z_$][\w$]*)\s*(?=\()/g, fnColor, true);
   apply(/\b([a-zA-Z_$][\w$]*)\s*(?=:\s*$)/g, fnColor, true);
 
-  // 7. Booleans & Constants
+  // 6. Booleans & Constants
   apply(/\b(true|false|null|undefined|nil|None|True|False|NaN|Infinity)\b/g, boolColor, false);
   apply(/\b([A-Z_][A-Z0-9_]{2,})\b/g, boolColor, false);
 
-  // 8. Numbers (hex, binary, float, integer)
+  // 7. Numbers (hex, binary, float, integer)
   apply(/\b(0x[0-9a-fA-F]+|0b[01]+|\d+(\.\d+)?([eE][+-]?\d+)?)\b/g, numColor, false);
 
-  // 9. Operators
+  // 8. Operators
   apply(/(=>|===|!==|==|!=|<=|>=|&&|\|\||\+\+|--|\+=|-=|\*=|\/=|%=|\+|-|\*|\/|%|=|->)/g, opColor, false);
 }
 
@@ -2233,14 +2272,15 @@ function getHeadingConstant(type) {
  */
 function detectTextRole(p, text, isFirstNonEmpty, state) {
   state = state || {};
+  state.nonEmptyCount = (state.nonEmptyCount || 0) + 1;
   if (!text || text.length === 0) {
     return { role: 'body', headingLevel: 0, cleanText: '' };
   }
 
-  // 1. Markdown syntax check (applies regardless of prior headings)
+  // 1. Markdown syntax check (first # in document is always title if no title yet)
   if (/^#\s+(.+)$/.test(text)) {
     const clean = text.replace(/^#\s+/, '').trim();
-    if (!state.hasTitle && isFirstNonEmpty) {
+    if (!state.hasTitle) {
       state.hasTitle = true;
       return { role: 'title', headingLevel: 1, cleanText: clean };
     }
@@ -2263,21 +2303,28 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     return { role: 'sub', headingLevel: 3, cleanText: clean };
   }
 
-  // 2. Explicit Title prefixes: "Title: ...", "Document Title: ..."
-  const titlePrefixMatch = text.match(/^(?:Document\s+Title|Title)\s*[:–—]\s*(.+)$/i);
+  // 2. Explicit Title prefixes: "Title: ...", "Document Title: ...", "Project Title: ..."
+  const titlePrefixMatch = text.match(/^(?:Document\s+Title|Project\s+Title|Paper\s+Title|Report\s+Title|Title)\s*[:–—]\s*(.+)$/i);
   if (titlePrefixMatch) {
     state.hasTitle = true;
     return { role: 'title', headingLevel: 1, cleanText: titlePrefixMatch[1].trim() };
   }
 
   // 3. Pre-existing Google Docs formal headings (preserve unless overridden)
-  const existingHeading = p.getHeading();
+  let existingHeading = null;
+  try {
+    existingHeading = p.getHeading();
+  } catch(e) {}
   if (existingHeading && existingHeading !== DocumentApp.ParagraphHeading.NORMAL) {
     if (existingHeading === DocumentApp.ParagraphHeading.TITLE) {
       state.hasTitle = true;
       return { role: 'title', headingLevel: 1, cleanText: text };
     }
     if (existingHeading === (DocumentApp.ParagraphHeading.HEADING1 || DocumentApp.ParagraphHeading.HEADING_1)) {
+      if (!state.hasTitle && state.nonEmptyCount <= 2 && text.length <= 130) {
+        state.hasTitle = true;
+        return { role: 'title', headingLevel: 1, cleanText: text };
+      }
       state.lastHeadingLevel = 1;
       return { role: 'heading1', headingLevel: 1, cleanText: text };
     }
@@ -2297,30 +2344,70 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     return { role: 'body', headingLevel: 0, cleanText: text };
   }
 
-  // Check if text ends in sentence punctuation (. ! ?)
-  const endsInPunctuation = /[.!?]$/.test(text) && !/^(?:etc|vs|vol|no|dr|mr|mrs|prof)\.$/i.test(text);
+  // Common metadata prefixes at top of documents that shouldn't be titles
+  const isMetadataLine = /^(?:by|author|date|published|version|rev|changelog|copyright|table of contents|toc|license|page\s+\d+)[:\s]/i.test(text);
 
-  // 5. First Non-Empty line Document Title heuristic
-  if (isFirstNonEmpty && !state.hasTitle) {
-    if (text.length <= 110 && !endsInPunctuation) {
-      const words = text.split(/\s+/);
-      if (words.length <= 14) {
+  // Check if text looks like a running narrative sentence (ends in period and has multiple sentences or is long)
+  const isNarrativeSentence = /[.;]$/.test(text) && !/^(?:etc|vs|vol|no|dr|mr|mrs|prof)\.$/i.test(text) && (text.split(/\s+/).length > 16 || /[.!?]\s+[A-Z]/.test(text));
+
+  // 5. Document Top Title Heuristic (within first 3 non-empty paragraphs if no title yet)
+  let isEntirelyBold = false;
+  let maxFontSize = 0;
+  let alignment = null;
+  try {
+    const textObj = p.editAsText();
+    if (textObj.getText().length > 0) {
+      isEntirelyBold = textObj.isBold() === true;
+      maxFontSize = Number(textObj.getFontSize(0)) || 0;
+    }
+    alignment = p.getAlignment();
+  } catch(e) {}
+
+  if (!state.hasTitle && state.nonEmptyCount <= 3 && !isMetadataLine && !isNarrativeSentence) {
+    const words = text.split(/\s+/);
+    if (words.length <= 16 && text.length <= 130) {
+      const hasStyleCue = (maxFontSize >= 15) || isEntirelyBold || (alignment === DocumentApp.HorizontalAlignment.CENTER);
+      if (hasStyleCue || isFirstNonEmpty) {
         state.hasTitle = true;
         return { role: 'title', headingLevel: 1, cleanText: text };
       }
     }
   }
 
-  // 6. Numbered Sub-sub-sections (H3): e.g. "1.1.1 Overview", "(a) Item", "(1) Item"
-  if (text.length <= 90 && !endsInPunctuation) {
+  // 6. Typographic cues: Large font anywhere before any heading
+  if (maxFontSize >= 18 && text.length <= 120 && !isNarrativeSentence) {
+    if (!state.hasTitle) {
+      state.hasTitle = true;
+      return { role: 'title', headingLevel: 1, cleanText: text };
+    }
+    state.lastHeadingLevel = 1;
+    return { role: 'heading1', headingLevel: 1, cleanText: text };
+  }
+
+  // 7. Bold short headings
+  if (isEntirelyBold && text.length <= 90 && !isNarrativeSentence) {
+    if (!state.hasTitle && state.nonEmptyCount <= 3) {
+      state.hasTitle = true;
+      return { role: 'title', headingLevel: 1, cleanText: text };
+    }
+    if (state.lastHeadingLevel === 1 && text.length < 50) {
+      state.lastHeadingLevel = 2;
+      return { role: 'sub', headingLevel: 2, cleanText: text };
+    }
+    state.lastHeadingLevel = 1;
+    return { role: 'heading1', headingLevel: 1, cleanText: text };
+  }
+
+  // 8. Numbered Sub-sub-sections (H3): e.g. "1.1.1 Overview", "(a) Item", "(1) Item"
+  if (text.length <= 90 && !isNarrativeSentence) {
     if (/^\d+\.\d+\.\d+\.?\s+[A-Za-z]/.test(text) || /^\([a-z0-9]+\)\s+[A-Za-z]/i.test(text)) {
       state.lastHeadingLevel = 3;
       return { role: 'sub', headingLevel: 3, cleanText: text };
     }
   }
 
-  // 7. Numbered Sub-sections (H2): e.g. "1.1 Background", "2.3 Implementation", "a) Setup", "Step 1:"
-  if (text.length <= 90 && !endsInPunctuation) {
+  // 9. Numbered Sub-sections (H2): e.g. "1.1 Background", "2.3 Implementation", "a) Setup", "Step 1:"
+  if (text.length <= 90 && !isNarrativeSentence) {
     if (
       /^\d+\.\d+\.?\s+[A-Za-z]/.test(text) ||
       /^[a-z]\)\s+[A-Za-z]/.test(text) ||
@@ -2331,8 +2418,8 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // 8. Numbered Main Sections (H1): e.g. "1. Introduction", "2. Architecture", "I. Executive Summary", "A. Background"
-  if (text.length <= 90 && !endsInPunctuation) {
+  // 10. Numbered Main Sections (H1): e.g. "1. Introduction", "2. Architecture", "I. Executive Summary", "A. Background"
+  if (text.length <= 90 && !isNarrativeSentence) {
     if (
       /^(?:\d+|[A-Z]|[IVXLCDM]+)\.\s+[A-Z]/.test(text) ||
       /^(?:Section|Chapter|Part|Module|Unit|Phase)\s+(?:\d+|[A-Z]|[IVXLCDM]+)[:.\s–—]/i.test(text)
@@ -2342,50 +2429,30 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // 9. Typographic & Font styling cues from Google Docs:
-  let isEntirelyBold = false;
-  let maxFontSize = 0;
-  try {
-    const textObj = p.editAsText();
-    if (textObj.getText().length > 0) {
-      isEntirelyBold = textObj.isBold() === true;
-      maxFontSize = Number(textObj.getFontSize(0)) || 0;
-    }
-  } catch(e) {}
-
-  if (maxFontSize >= 22 && text.length <= 110 && !endsInPunctuation) {
-    state.hasTitle = true;
-    return { role: 'title', headingLevel: 1, cleanText: text };
-  }
-
-  if (isEntirelyBold && text.length <= 80 && !endsInPunctuation) {
-    if (state.lastHeadingLevel === 1 && text.length < 50) {
-      state.lastHeadingLevel = 2;
-      return { role: 'sub', headingLevel: 2, cleanText: text };
+  // 11. Font size 14-17pt
+  if (maxFontSize >= 14 && text.length <= 90 && !isNarrativeSentence) {
+    if (!state.hasTitle && state.nonEmptyCount <= 3) {
+      state.hasTitle = true;
+      return { role: 'title', headingLevel: 1, cleanText: text };
     }
     state.lastHeadingLevel = 1;
     return { role: 'heading1', headingLevel: 1, cleanText: text };
   }
 
-  if (maxFontSize >= 16 && text.length <= 80 && !endsInPunctuation) {
-    state.lastHeadingLevel = 1;
-    return { role: 'heading1', headingLevel: 1, cleanText: text };
-  }
-  if (maxFontSize >= 13 && text.length <= 80 && !endsInPunctuation) {
-    state.lastHeadingLevel = 2;
-    return { role: 'sub', headingLevel: 2, cleanText: text };
-  }
-
-  // 10. ALL CAPS Standalone Headings (H1): e.g. "EXECUTIVE SUMMARY", "METHODOLOGY", "RESULTS"
-  if (text.length >= 3 && text.length <= 55 && !endsInPunctuation) {
+  // 12. ALL CAPS Standalone Headings (H1): e.g. "EXECUTIVE SUMMARY", "METHODOLOGY", "RESULTS"
+  if (text.length >= 3 && text.length <= 60 && !isNarrativeSentence) {
     if (/^[A-Z0-9\s&,/:–—\-]+$/.test(text) && /[A-Z]{2,}/.test(text)) {
+      if (!state.hasTitle && state.nonEmptyCount <= 2) {
+        state.hasTitle = true;
+        return { role: 'title', headingLevel: 1, cleanText: text };
+      }
       state.lastHeadingLevel = 1;
       return { role: 'heading1', headingLevel: 1, cleanText: text };
     }
   }
 
-  // 11. Title Case Short Headers without punctuation (e.g. "Key Architecture Overview")
-  if (text.length >= 4 && text.length <= 65 && !endsInPunctuation) {
+  // 13. Title Case Short Headers without punctuation (e.g. "Key Architecture Overview")
+  if (text.length >= 4 && text.length <= 65 && !isNarrativeSentence) {
     const words = text.split(/\s+/);
     if (words.length >= 2 && words.length <= 8) {
       const majorWords = words.filter(w => !['and','or','the','in','on','at','to','for','with','of','a','an'].includes(w.toLowerCase()));
@@ -2393,6 +2460,10 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
       if (majorWords.length > 0 && capCount / majorWords.length >= 0.8) {
         const hasCommonVerb = words.some(w => ['is','are','was','were','has','have','can','could','should','will','would'].includes(w.toLowerCase()));
         if (!hasCommonVerb) {
+          if (!state.hasTitle && state.nonEmptyCount <= 2) {
+            state.hasTitle = true;
+            return { role: 'title', headingLevel: 1, cleanText: text };
+          }
           const role = (state.lastHeadingLevel === 1) ? 'sub' : 'heading1';
           state.lastHeadingLevel = (role === 'sub') ? 2 : 1;
           return { role: role, headingLevel: (role === 'sub') ? 2 : 1, cleanText: text };
@@ -2555,18 +2626,18 @@ function formatSelectedTypography(options) {
 
     if (detection.role === 'title') {
       safeSetHeading(p, getHeadingConstant('TITLE'));
-      applyHeadingStyles(p, options.title, options.title.bgEnabled && options.title.bgStyle === 'inline' ? options.title.bgColor : null);
+      formatSingleHeading(body, p, options.title);
       titleCount++;
     } else if (detection.role === 'heading1') {
       safeSetHeading(p, getHeadingConstant('HEADING1'));
-      applyHeadingStyles(p, options.heading1, options.heading1.bgEnabled && options.heading1.bgStyle === 'inline' ? options.heading1.bgColor : null);
+      formatSingleHeading(body, p, options.heading1);
       h1Count++;
     } else if (detection.role === 'sub') {
       const hLevelEnum = detection.headingLevel === 3
         ? getHeadingConstant('HEADING3')
         : getHeadingConstant('HEADING2');
       safeSetHeading(p, hLevelEnum);
-      applyHeadingStyles(p, options.subHeading, options.subHeading.bgEnabled && options.subHeading.bgStyle === 'inline' ? options.subHeading.bgColor : null);
+      formatSingleHeading(body, p, options.subHeading);
       subCount++;
     } else {
       safeSetHeading(p, getHeadingConstant('NORMAL'));
@@ -2666,13 +2737,29 @@ function formatSingleHeading(body, p, config) {
   if (!config) return;
 
   const bgEnabled = !!config.bgEnabled;
-  const bgStyle = config.bgStyle || 'inline';
+  const bgStyle = config.bgStyle || 'banner';
   const bgColor = config.bgColor || '#EFF6FF';
 
   let targetPara = p;
 
   if (bgEnabled && bgStyle === 'banner') {
     targetPara = wrapParagraphInBanner(body, p, bgColor);
+  } else {
+    // If paragraph is inside a banner table, but banner is disabled or inline, unwrap it!
+    try {
+      const parent = p.getParent();
+      if (parent && parent.getType() === DocumentApp.ElementType.TABLE_CELL) {
+        const cell = parent.asTableCell();
+        const row = cell.getParent().asTableRow();
+        const table = row.getParent().asTable();
+        if (table.getNumRows() === 1 && row.getNumCells() === 1 && isHeadingBannerTable(table)) {
+          const unrolled = unrollSingleHeadingBanner(body, table);
+          if (unrolled && unrolled.length > 0) {
+            targetPara = unrolled[0];
+          }
+        }
+      }
+    } catch(e) {}
   }
 
   applyHeadingStyles(targetPara, config, bgEnabled && bgStyle === 'inline' ? bgColor : null);
@@ -2684,6 +2771,18 @@ function formatSingleHeading(body, p, config) {
 function wrapParagraphInBanner(body, p, bgColor) {
   try {
     const parent = p.getParent();
+    // If paragraph is already inside a 1x1 table cell, directly update the cell's background color!
+    if (parent && parent.getType() === DocumentApp.ElementType.TABLE_CELL) {
+      const cell = parent.asTableCell();
+      const row = cell.getParent().asTableRow();
+      const table = row.getParent().asTable();
+      if (table.getNumRows() === 1 && row.getNumCells() === 1) {
+        cell.setBackgroundColor(bgColor);
+        try { table.setBorderColor(bgColor); } catch(e) {}
+        return p;
+      }
+    }
+
     if (parent.getType() !== DocumentApp.ElementType.BODY_SECTION) {
       return p;
     }
@@ -2708,6 +2807,11 @@ function wrapParagraphInBanner(body, p, bgColor) {
 
     const cellPara = cell.getChild(0).asParagraph();
     cellPara.setText(text);
+    safeSetHeading(cellPara, headingType);
+    try {
+      cellPara.setAlignment(p.getAlignment());
+      cellPara.setLineSpacing(p.getLineSpacing());
+    } catch(e) {}
 
     try {
       const pageWidth = body.getPageWidth();
@@ -2866,10 +2970,16 @@ function unrollSingleHeadingBanner(body, table) {
     if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
       const p = child.asParagraph();
       const text = p.getText();
-      const heading = p.getHeading();
+      let heading = p.getHeading();
+      if (!heading || heading === DocumentApp.ParagraphHeading.NORMAL) {
+        heading = DocumentApp.ParagraphHeading.TITLE;
+      }
       if (i === 0 && text === '' && numChildren > 1) continue;
       const newP = body.insertParagraph(insertIndex + createdParas.length, text);
       safeSetHeading(newP, heading);
+      try {
+        newP.setAlignment(p.getAlignment());
+      } catch(e) {}
       createdParas.push(newP);
     }
   }
@@ -2962,9 +3072,9 @@ function getTypographyPreferences() {
       textColor: '#1E3A8A',
       alignment: 'CENTER',
       bold: true,
-      bgEnabled: false,
+      bgEnabled: true,
       bgColor: '#EFF6FF',
-      bgStyle: 'inline'
+      bgStyle: 'banner'
     },
     heading1: {
       fontFamily: 'Montserrat',
@@ -3394,7 +3504,7 @@ function getSidebarHtml() {
           <div class="typo-card">
             <div class="typo-card-header">
               <span class="typo-card-title">📖 Document Title (TITLE)</span>
-              <label class="checkbox-label"><input type="checkbox" id="typoTitleBgToggle" onchange="updateTypographyPreview()"> Add Background</label>
+              <label class="checkbox-label"><input type="checkbox" id="typoTitleBgToggle" checked onchange="updateTypographyPreview()"> Add Background</label>
             </div>
             <div class="row-2col">
               <div>
@@ -3454,7 +3564,7 @@ function getSidebarHtml() {
               </div>
               <div class="color-row">
                 <label>Background Color:</label>
-                <input type="color" id="typoTitleBgColor" value="#EFF6FF" onchange="setTypoCustomMode()">
+                <input type="color" id="typoTitleBgColor" value="#EFF6FF" onchange="setTypoTitleBgMode()">
               </div>
             </div>
           </div>
@@ -4296,31 +4406,31 @@ function getSidebarHtml() {
              ========================================================= */
           const TYPOGRAPHY_PRESETS = {
             'executive-navy': {
-              titleFont: 'Montserrat', titleSize: '26', titleColor: '#1E3A8A', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#EFF6FF', titleBgStyle: 'banner',
+              titleFont: 'Montserrat', titleSize: '26', titleColor: '#1E3A8A', titleAlign: 'CENTER', titleBgEnabled: true, titleBgColor: '#EFF6FF', titleBgStyle: 'banner',
               h1Font: 'Montserrat', h1Size: '18', h1Color: '#1E3A8A', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#EFF6FF', h1BgStyle: 'banner',
               subFont: 'Montserrat', subSize: '14', subColor: '#2563EB', subAlign: 'LEFT', subBgEnabled: false, subBgColor: '#F1F5F9', subBgStyle: 'inline',
               bodyFont: 'Roboto', bodySize: '11', bodyColor: '#1F2937', bodyAlign: 'LEFT', bodyApply: true
             },
             'modern-tech': {
-              titleFont: 'Inter', titleSize: '26', titleColor: '#312E81', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#EEF2FF', titleBgStyle: 'banner',
+              titleFont: 'Inter', titleSize: '26', titleColor: '#312E81', titleAlign: 'CENTER', titleBgEnabled: true, titleBgColor: '#EEF2FF', titleBgStyle: 'banner',
               h1Font: 'Inter', h1Size: '18', h1Color: '#4338CA', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#EEF2FF', h1BgStyle: 'banner',
               subFont: 'Inter', subSize: '14', subColor: '#6366F1', subAlign: 'LEFT', subBgEnabled: true, subBgColor: '#F5F3FF', subBgStyle: 'inline',
               bodyFont: 'Inter', bodySize: '10.5', bodyColor: '#111827', bodyAlign: 'LEFT', bodyApply: true
             },
             'emerald-forest': {
-              titleFont: 'Montserrat', titleSize: '26', titleColor: '#064E3B', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#ECFDF5', titleBgStyle: 'banner',
+              titleFont: 'Montserrat', titleSize: '26', titleColor: '#064E3B', titleAlign: 'CENTER', titleBgEnabled: true, titleBgColor: '#ECFDF5', titleBgStyle: 'banner',
               h1Font: 'Montserrat', h1Size: '18', h1Color: '#065F46', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#ECFDF5', h1BgStyle: 'banner',
               subFont: 'Montserrat', subSize: '14', subColor: '#0D9488', subAlign: 'LEFT', subBgEnabled: false, subBgColor: '#F0FDFA', subBgStyle: 'inline',
               bodyFont: 'Roboto', bodySize: '11', bodyColor: '#1F2937', bodyAlign: 'LEFT', bodyApply: true
             },
             'editorial-classic': {
-              titleFont: 'Georgia', titleSize: '28', titleColor: '#18181B', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#F4F4F5', titleBgStyle: 'inline',
+              titleFont: 'Georgia', titleSize: '28', titleColor: '#18181B', titleAlign: 'CENTER', titleBgEnabled: true, titleBgColor: '#F4F4F5', titleBgStyle: 'inline',
               h1Font: 'Georgia', h1Size: '18', h1Color: '#27272A', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#F4F4F5', h1BgStyle: 'inline',
               subFont: 'Georgia', subSize: '14', subColor: '#52525B', subAlign: 'LEFT', subBgEnabled: false, subBgColor: '#F4F4F5', subBgStyle: 'inline',
               bodyFont: 'Georgia', bodySize: '11', bodyColor: '#27272A', bodyAlign: 'LEFT', bodyApply: true
             },
             'crimson-luxe': {
-              titleFont: 'Montserrat', titleSize: '26', titleColor: '#881337', titleAlign: 'CENTER', titleBgEnabled: false, titleBgColor: '#FFF1F2', titleBgStyle: 'banner',
+              titleFont: 'Montserrat', titleSize: '26', titleColor: '#881337', titleAlign: 'CENTER', titleBgEnabled: true, titleBgColor: '#FFF1F2', titleBgStyle: 'banner',
               h1Font: 'Montserrat', h1Size: '18', h1Color: '#9F1239', h1Align: 'LEFT', h1BgEnabled: true, h1BgColor: '#FFF1F2', h1BgStyle: 'banner',
               subFont: 'Montserrat', subSize: '14', subColor: '#BE123C', subAlign: 'LEFT', subBgEnabled: false, subBgColor: '#FFE4E6', subBgStyle: 'inline',
               bodyFont: 'Roboto', bodySize: '11', bodyColor: '#1F2937', bodyAlign: 'LEFT', bodyApply: true
@@ -4333,7 +4443,7 @@ function getSidebarHtml() {
             document.getElementById('typoTitleFontSelect').value = savedTypoPrefs.title.fontFamily || 'Montserrat';
             document.getElementById('typoTitleSizeSelect').value = savedTypoPrefs.title.fontSize || '26';
             document.getElementById('typoTitleAlignSelect').value = savedTypoPrefs.title.alignment || 'CENTER';
-            document.getElementById('typoTitleBgToggle').checked = !!savedTypoPrefs.title.bgEnabled;
+            document.getElementById('typoTitleBgToggle').checked = savedTypoPrefs.title.bgEnabled !== undefined ? savedTypoPrefs.title.bgEnabled : true;
             document.getElementById('typoTitleBgStyleSelect').value = savedTypoPrefs.title.bgStyle || 'banner';
             document.getElementById('typoTitleColor').value = savedTypoPrefs.title.textColor || '#1E3A8A';
             document.getElementById('typoTitleBgColor').value = savedTypoPrefs.title.bgColor || '#EFF6FF';
@@ -4404,6 +4514,11 @@ function getSidebarHtml() {
           function setTypoCustomMode() {
             document.getElementById('typoPresetSelect').value = 'custom';
             updateTypographyPreview();
+          }
+
+          function setTypoTitleBgMode() {
+            document.getElementById('typoTitleBgToggle').checked = true;
+            setTypoCustomMode();
           }
 
           function updateTypographyPreview() {

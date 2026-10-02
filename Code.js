@@ -1066,6 +1066,18 @@ function getSidebarHtml() {
             </select>
           </div>
 
+          <div class="control-group">
+            <label>Border Width</label>
+            <select id="tableBorderWidthSelect" onchange="updateTablePreview()">
+              <option value="0">0 pt &mdash; Borderless (No lines)</option>
+              <option value="0.5">0.5 pt &mdash; Hairline (Ultra-thin)</option>
+              <option value="1" selected>1 pt &mdash; Standard (Default)</option>
+              <option value="1.5">1.5 pt &mdash; Medium (Visible)</option>
+              <option value="2">2 pt &mdash; Bold (Strong grid)</option>
+              <option value="3">3 pt &mdash; Heavy (Prominent)</option>
+            </select>
+          </div>
+
           <!-- Color Adjustments -->
           <div class="section-title">Color Palette</div>
           <div class="color-grid">
@@ -1206,6 +1218,26 @@ function getSidebarHtml() {
             </div>
           </div>
 
+          <div class="section-title">🎨 Token Colors</div>
+          <div class="color-grid">
+            <div class="color-row">
+              <label>Keywords <small style="opacity:.65">(if, return, class…)</small>:</label>
+              <input type="color" id="cKwColor" value="${codePrefs.keywordColor || '#CF222E'}" onchange="setCodeCustomMode()">
+            </div>
+            <div class="color-row">
+              <label>Strings <small style="opacity:.65">("text", 'value')</small>:</label>
+              <input type="color" id="cStrColor" value="${codePrefs.stringColor || '#0A3069'}" onchange="setCodeCustomMode()">
+            </div>
+            <div class="color-row">
+              <label>Comments <small style="opacity:.65">(// notes)</small>:</label>
+              <input type="color" id="cComColor" value="${codePrefs.commentColor || '#6E7781'}" onchange="setCodeCustomMode()">
+            </div>
+            <div class="color-row">
+              <label>Numbers <small style="opacity:.65">(42, 3.14)</small>:</label>
+              <input type="color" id="cNumColor" value="${codePrefs.numberColor || '#953800'}" onchange="setCodeCustomMode()">
+            </div>
+          </div>
+
           <!-- Code Preview -->
           <div class="preview-container">
             <div class="preview-header">
@@ -1282,6 +1314,7 @@ function getSidebarHtml() {
           document.getElementById('tableHeaderFontSelect').value = '${tablePrefs.headerFontSize || 11}';
           document.getElementById('tableBodyFontSelect').value = '${tablePrefs.bodyFontSize || 9.5}';
           document.getElementById('tablePaddingSelect').value = '${tablePrefs.padding || 'normal'}';
+          document.getElementById('tableBorderWidthSelect').value = '${tablePrefs.borderWidth !== undefined ? tablePrefs.borderWidth : 1}';
 
           function onTableThemeChange() {
             const val = document.getElementById('tableThemeSelect').value;
@@ -1342,10 +1375,13 @@ function getSidebarHtml() {
             if (padMode === 'compact') padPx = '4px 6px';
             if (padMode === 'relaxed') padPx = '10px 12px';
 
+            const borderWidthPx = document.getElementById('tableBorderWidthSelect').value;
             const allCells = document.querySelectorAll('#previewTableEl th, #previewTableEl td');
             allCells.forEach(cell => {
               cell.style.borderColor = borderCol;
               cell.style.padding = padPx;
+              cell.style.borderWidth = (parseFloat(borderWidthPx) || 0) + 'px';
+              cell.style.borderStyle = parseFloat(borderWidthPx) > 0 ? 'solid' : 'none';
             });
 
             // Live preview: inline code token highlight
@@ -1376,7 +1412,7 @@ function getSidebarHtml() {
               bodyFontSize: document.getElementById('tableBodyFontSelect').value,
               padding: document.getElementById('tablePaddingSelect').value,
               textColor: '#1E293B',
-              borderWidth: 1,
+              borderWidth: parseFloat(document.getElementById('tableBorderWidthSelect').value) || 0,
               inlineCodeHighlight: document.getElementById('tInlineCodeToggle').checked,
               inlineCodeBg: document.getElementById('tInlineCodeBg').value,
               inlineCodeColor: document.getElementById('tInlineCodeColor').value
@@ -1441,6 +1477,10 @@ function getSidebarHtml() {
               document.getElementById('cBgColor').value = t.bg;
               document.getElementById('cTextColor').value = t.text;
               document.getElementById('cBorderColor').value = t.border;
+              document.getElementById('cKwColor').value = t.kw;
+              document.getElementById('cStrColor').value = t.str;
+              document.getElementById('cComColor').value = t.com;
+              document.getElementById('cNumColor').value = t.num;
             }
             updateCodePreview();
           }
@@ -1455,7 +1495,6 @@ function getSidebarHtml() {
             const text = document.getElementById('cTextColor').value;
             const border = document.getElementById('cBorderColor').value;
             const font = document.getElementById('codeFontFamilySelect').value;
-            const theme = document.getElementById('codeThemeSelect').value;
 
             const box = document.getElementById('codePreviewBox');
             box.style.backgroundColor = bg;
@@ -1463,27 +1502,25 @@ function getSidebarHtml() {
             box.style.borderColor = border;
             box.style.fontFamily = font + ', monospace';
 
-            const t = CODE_THEMES[theme] || CODE_THEMES['github-light'];
-            document.getElementById('pKw').style.color = t.kw;
-            document.getElementById('pKw2').style.color = t.kw;
-            document.getElementById('pStr').style.color = t.str;
-            document.getElementById('pCom').style.color = t.com;
+            // Use token color pickers directly (updated by theme OR manual pick)
+            document.getElementById('pKw').style.color  = document.getElementById('cKwColor').value;
+            document.getElementById('pKw2').style.color = document.getElementById('cKwColor').value;
+            document.getElementById('pStr').style.color = document.getElementById('cStrColor').value;
+            document.getElementById('pCom').style.color = document.getElementById('cComColor').value;
           }
 
           function getCodeOptions() {
-            const theme = document.getElementById('codeThemeSelect').value;
-            const t = CODE_THEMES[theme] || {};
             return {
-              theme: theme,
+              theme: document.getElementById('codeThemeSelect').value,
               fontSize: document.getElementById('codeFontSizeSelect').value,
               fontFamily: document.getElementById('codeFontFamilySelect').value,
               bgColor: document.getElementById('cBgColor').value,
               textColor: document.getElementById('cTextColor').value,
               borderColor: document.getElementById('cBorderColor').value,
-              keywordColor: t.kw || '#2563EB',
-              stringColor: t.str || '#059669',
-              commentColor: t.com || '#64748B',
-              numberColor: t.num || '#9333EA'
+              keywordColor: document.getElementById('cKwColor').value,
+              stringColor: document.getElementById('cStrColor').value,
+              commentColor: document.getElementById('cComColor').value,
+              numberColor: document.getElementById('cNumColor').value
             };
           }
 

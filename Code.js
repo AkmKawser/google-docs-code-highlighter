@@ -8,10 +8,15 @@
 function onOpen() {
   DocumentApp.getUi()
     .createMenu('⚡ Code, Table & Typography Suite')
+    .addItem('🚀 Smart Auto-Format Entire Document', 'quickSmartAutoFormatDocument')
+    .addSeparator()
     .addItem('Open Sidebar (Styles & Colors)', 'showSidebar')
     .addSeparator()
-    .addItem('✍️ Format Document Typography', 'quickFormatDocumentTypography')
-    .addItem('✍️ Format Selected Text Only', 'quickFormatSelectedTypography')
+    .addItem('✍️ Format All Document Typography', 'quickFormatDocumentTypography')
+    .addItem('✍️ Format Selected Text Auto', 'quickFormatSelectedTypography')
+    .addItem('📖 Format Selection as Title', 'quickFormatSelectedAsTitle')
+    .addItem('📌 Format Selection as Heading 1', 'quickFormatSelectedAsH1')
+    .addItem('📑 Format Selection as Sub-Heading', 'quickFormatSelectedAsSub')
     .addItem('↩ Undo Document Text Formatting', 'quickUndoDocumentTypography')
     .addSeparator()
     .addItem('📊 Format & Center All Tables', 'quickFormatAllTables')
@@ -636,6 +641,7 @@ function highlightAllCodeBlocks(options) {
   
   let codeGroups = [];
   let inCode = false;
+  let inFencedCode = false;
   let braceDepth = 0;
   let currentGroup = [];
   let blankBuffer = [];
@@ -652,6 +658,28 @@ function highlightAllCodeBlocks(options) {
     const text = p.getText();
     const trimmed = text.trim();
 
+    // 1. Fenced Code Block Handler: ``` or ```lang
+    if (/^```/.test(trimmed)) {
+      if (!inFencedCode) {
+        if (inCode) finishGroup();
+        inFencedCode = true;
+        inCode = true;
+        currentGroup.push(p);
+        continue;
+      } else {
+        currentGroup.push(p);
+        inFencedCode = false;
+        finishGroup();
+        continue;
+      }
+    }
+
+    if (inFencedCode) {
+      currentGroup.push(p);
+      continue;
+    }
+
+    // 2. Syntax-based / Indented Code Block Handler
     if (!inCode) {
       if (isCodeStart(text)) {
         inCode = true;
@@ -702,6 +730,7 @@ function highlightAllCodeBlocks(options) {
     currentGroup = [];
     blankBuffer = [];
     inCode = false;
+    inFencedCode = false;
     braceDepth = 0;
   }
 
@@ -732,14 +761,20 @@ function getNetBraceCount(text) {
 
 function isCodeStart(text) {
   const trimmed = text.trim();
-  if (!trimmed || isStrongProse(trimmed)) return false;
+  if (!trimmed) return false;
+  if (/^```/.test(trimmed)) return true;
+  if (isStrongProse(trimmed)) return false;
+
+  // Never match markdown headings as code comments
+  if (/^#{1,6}\s+/.test(trimmed)) return false;
 
   const startPatterns = [
     /^(def|class|function|const|let|var|import|export|public|private|protected|static|package|namespace)\b/,
     /^(if|for|while|switch|catch|with|elif)\s*(\(|:)/,
     /^(try|except|finally|else):?$/,
     /^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|FROM|WHERE)\b/i,
-    /^\s*(\/\/|#|\/\*|\*\/|<!--)/,
+    /^\s*(\/\/|\/\*|\*\/|<!--)/,
+    /^\s*#(?!\s+[A-Za-z0-9])|^\s*#\s*$/, // Code comment, but NOT # Heading
     /[A-Za-z0-9_$]+\.[A-Za-z0-9_$]+\(/,
     /(=>|===|!==|\+=|-=|\+\+|--|&&|\|\|)/,
     /^[A-Za-z0-9_$]+\s*=\s*.+/,
@@ -753,6 +788,7 @@ function isCodeStart(text) {
 function isCodeLine(text) {
   const trimmed = text.trim();
   if (!trimmed) return true;
+  if (/^```/.test(trimmed)) return true;
   if (isStrongProse(trimmed)) return false;
   if (/^\s*[}\])];?$/.test(trimmed)) return true;
   if (/^\s*\.[A-Za-z0-9_$]+/.test(trimmed)) return true;
@@ -765,6 +801,7 @@ function isCodeLine(text) {
 function isStrongProse(text) {
   const trimmed = text.trim();
   if (!trimmed) return false;
+  if (/^```/.test(trimmed)) return false;
   if (/^(def|class|function|const|let|var|import|export|return|public|private|static|if|for|while)\b/.test(trimmed)) return false;
   if (/[{};]$/.test(trimmed) || /(=>|===|!==)/.test(trimmed)) return false;
   if (/^\s{2,}|\t/.test(text)) return false;
@@ -809,7 +846,16 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
   const textColor = options.textColor || '#24292F';
 
   // Apply indentation handling
-  const rawLines = paragraphGroup.map(p => p.getText());
+  let rawLines = paragraphGroup.map(p => p.getText());
+  if (rawLines.length >= 2 && /^```/.test(rawLines[0].trim()) && /^```/.test(rawLines[rawLines.length - 1].trim())) {
+    rawLines = rawLines.slice(1, -1);
+  } else if (rawLines.length >= 1 && /^```/.test(rawLines[0].trim())) {
+    rawLines = rawLines.slice(1);
+  } else if (rawLines.length >= 1 && /^```/.test(rawLines[rawLines.length - 1].trim())) {
+    rawLines = rawLines.slice(0, -1);
+  }
+  if (rawLines.length === 0) rawLines = [''];
+
   const indentStyle = options.indentStyle || 'auto-2';
   const formattedLines = formatCodeIndentation(rawLines, indentStyle);
 
@@ -1245,6 +1291,33 @@ function quickFormatSelectedTypography() {
 }
 
 /**
+ * Quick action to format selected text as Title from the menu
+ */
+function quickFormatSelectedAsTitle() {
+  const prefs = getTypographyPreferences();
+  const result = formatSelectedAs('title', prefs);
+  DocumentApp.getUi().alert('✍️ Typography Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Quick action to format selected text as Heading 1 from the menu
+ */
+function quickFormatSelectedAsH1() {
+  const prefs = getTypographyPreferences();
+  const result = formatSelectedAs('heading1', prefs);
+  DocumentApp.getUi().alert('✍️ Typography Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Quick action to format selected text as Sub-Heading from the menu
+ */
+function quickFormatSelectedAsSub() {
+  const prefs = getTypographyPreferences();
+  const result = formatSelectedAs('sub', prefs);
+  DocumentApp.getUi().alert('✍️ Typography Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+/**
  * Quick action to undo typography formatting from the menu
  */
 function quickUndoDocumentTypography() {
@@ -1253,7 +1326,279 @@ function quickUndoDocumentTypography() {
 }
 
 /**
- * Formats all headings and optionally body text according to typography options
+ * Master 1-Click Auto-Formatter:
+ * Intelligently scans the entire document to auto-detect what formatting
+ * to apply to every element:
+ * 1. Code blocks (fenced ``` and programming syntax) -> formatted & indented into code containers
+ * 2. Data tables -> centered on page and formatted with professional theme & zebra striping
+ * 3. Typography -> Title, Heading 1, Sub-headings (H2, H3), and Body text with inline code highlights
+ */
+function quickSmartAutoFormatDocument() {
+  const result = smartAutoFormatEntireDocument();
+  DocumentApp.getUi().alert('🚀 Smart Auto-Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
+}
+
+function smartAutoFormatEntireDocument(codeOptions, tableOptions, typoOptions) {
+  codeOptions = codeOptions || getUserPreferences();
+  tableOptions = tableOptions || getTablePreferences();
+  typoOptions = typoOptions || getTypographyPreferences();
+
+  // 1. Format code blocks first (extracts them into table containers so typography ignores them)
+  const codeResult = highlightAllCodeBlocks(codeOptions);
+
+  // 2. Format and center all data tables (code block tables are centered without losing syntax styles)
+  const tableResult = formatAllDocumentTables(tableOptions);
+
+  // 3. Auto-detect and format all typography (Title, H1, Subheadings, Body, inline code)
+  const typoResult = formatDocumentTypography(typoOptions);
+
+  const summary = [];
+  if (codeResult && codeResult.count > 0) summary.push(codeResult.count + ' code block(s) formatted');
+  if (tableResult && tableResult.count > 0) summary.push(tableResult.count + ' table(s) aligned & styled');
+  if (typoResult && typoResult.count > 0) summary.push(typoResult.message);
+
+  const message = summary.length > 0
+    ? '🚀 Smart Auto-Format Complete!\n\n• ' + summary.join('\n• ')
+    : 'Document scanned. All elements are formatted!';
+
+  return {
+    success: true,
+    codeResult: codeResult,
+    tableResult: tableResult,
+    typoResult: typoResult,
+    message: message
+  };
+}
+
+/**
+ * Safely sets the heading style of a paragraph without throwing an exception.
+ * In Google Apps Script, the ParagraphHeading constants do not have underscores:
+ * HEADING1, HEADING2, HEADING3, HEADING4, HEADING5, HEADING6, TITLE, SUBTITLE, NORMAL.
+ */
+function safeSetHeading(p, headingEnum) {
+  if (!p || headingEnum === undefined || headingEnum === null) return;
+  try {
+    // Only attempt on genuine standalone paragraphs
+    if (typeof p.getType === 'function' && p.getType() !== DocumentApp.ElementType.PARAGRAPH) {
+      return;
+    }
+    const parent = p.getParent();
+    if (parent && typeof parent.getType === 'function') {
+      const pType = parent.getType();
+      // Google Docs throws service exceptions if setHeading is called inside tables or list items
+      if (pType === DocumentApp.ElementType.TABLE_CELL ||
+          pType === DocumentApp.ElementType.TABLE_ROW ||
+          pType === DocumentApp.ElementType.TABLE ||
+          pType === DocumentApp.ElementType.LIST_ITEM) {
+        return;
+      }
+    }
+    if (typeof p.setHeading === 'function') {
+      p.setHeading(headingEnum);
+    }
+  } catch(e) {
+    // Gracefully catch Google Docs internal heading assignment exceptions
+  }
+}
+
+function getHeadingConstant(type) {
+  const PH = DocumentApp.ParagraphHeading;
+  if (!PH) return null;
+  switch (type) {
+    case 'TITLE': return PH.TITLE;
+    case 'SUBTITLE': return PH.SUBTITLE;
+    case 'HEADING1': case 'HEADING_1': case 1: return PH.HEADING1 || PH['HEADING_1'];
+    case 'HEADING2': case 'HEADING_2': case 2: return PH.HEADING2 || PH['HEADING_2'];
+    case 'HEADING3': case 'HEADING_3': case 3: return PH.HEADING3 || PH['HEADING_3'];
+    case 'HEADING4': case 'HEADING_4': case 4: return PH.HEADING4 || PH['HEADING_4'];
+    case 'HEADING5': case 'HEADING_5': case 5: return PH.HEADING5 || PH['HEADING_5'];
+    case 'HEADING6': case 'HEADING_6': case 6: return PH.HEADING6 || PH['HEADING_6'];
+    case 'NORMAL': default: return PH.NORMAL;
+  }
+}
+
+/**
+ * Intelligent classifier for document paragraphs:
+ * Analyzes structure, markdown markers, numbering patterns, typography hints,
+ * sentence punctuation, and context to automatically detect whether a paragraph
+ * is a Title, Heading 1, Sub-Heading (H2/H3), or Body Text.
+ */
+function detectTextRole(p, text, isFirstNonEmpty, state) {
+  state = state || {};
+  if (!text || text.length === 0) {
+    return { role: 'body', headingLevel: 0, cleanText: '' };
+  }
+
+  // 1. Markdown syntax check (applies regardless of prior headings)
+  if (/^#\s+(.+)$/.test(text)) {
+    const clean = text.replace(/^#\s+/, '').trim();
+    if (!state.hasTitle && isFirstNonEmpty) {
+      state.hasTitle = true;
+      return { role: 'title', headingLevel: 1, cleanText: clean };
+    }
+    state.lastHeadingLevel = 1;
+    return { role: 'heading1', headingLevel: 1, cleanText: clean };
+  }
+  if (/^##\s+(.+)$/.test(text)) {
+    const clean = text.replace(/^##\s+/, '').trim();
+    state.lastHeadingLevel = 2;
+    return { role: 'sub', headingLevel: 2, cleanText: clean };
+  }
+  if (/^###\s+(.+)$/.test(text)) {
+    const clean = text.replace(/^###\s+/, '').trim();
+    state.lastHeadingLevel = 3;
+    return { role: 'sub', headingLevel: 3, cleanText: clean };
+  }
+  if (/^#{4,6}\s+(.+)$/.test(text)) {
+    const clean = text.replace(/^#{4,6}\s+/, '').trim();
+    state.lastHeadingLevel = 3;
+    return { role: 'sub', headingLevel: 3, cleanText: clean };
+  }
+
+  // 2. Explicit Title prefixes: "Title: ...", "Document Title: ..."
+  const titlePrefixMatch = text.match(/^(?:Document\s+Title|Title)\s*[:–—]\s*(.+)$/i);
+  if (titlePrefixMatch) {
+    state.hasTitle = true;
+    return { role: 'title', headingLevel: 1, cleanText: titlePrefixMatch[1].trim() };
+  }
+
+  // 3. Pre-existing Google Docs formal headings (preserve unless overridden)
+  const existingHeading = p.getHeading();
+  if (existingHeading && existingHeading !== DocumentApp.ParagraphHeading.NORMAL) {
+    if (existingHeading === DocumentApp.ParagraphHeading.TITLE) {
+      state.hasTitle = true;
+      return { role: 'title', headingLevel: 1, cleanText: text };
+    }
+    if (existingHeading === (DocumentApp.ParagraphHeading.HEADING1 || DocumentApp.ParagraphHeading.HEADING_1)) {
+      state.lastHeadingLevel = 1;
+      return { role: 'heading1', headingLevel: 1, cleanText: text };
+    }
+    if (
+      existingHeading === (DocumentApp.ParagraphHeading.HEADING2 || DocumentApp.ParagraphHeading.HEADING_2) ||
+      existingHeading === DocumentApp.ParagraphHeading.SUBTITLE
+    ) {
+      state.lastHeadingLevel = 2;
+      return { role: 'sub', headingLevel: 2, cleanText: text };
+    }
+    state.lastHeadingLevel = 3;
+    return { role: 'sub', headingLevel: 3, cleanText: text };
+  }
+
+  // 4. Exclude obvious non-headings (code blocks, quotes, bullet lists)
+  if (/^```/.test(text) || /^[-*•]\s+/.test(text) || /^>\s+/.test(text)) {
+    return { role: 'body', headingLevel: 0, cleanText: text };
+  }
+
+  // Check if text ends in sentence punctuation (. ! ?)
+  const endsInPunctuation = /[.!?]$/.test(text) && !/^(?:etc|vs|vol|no|dr|mr|mrs|prof)\.$/i.test(text);
+
+  // 5. First Non-Empty line Document Title heuristic
+  if (isFirstNonEmpty && !state.hasTitle) {
+    if (text.length <= 110 && !endsInPunctuation) {
+      const words = text.split(/\s+/);
+      if (words.length <= 14) {
+        state.hasTitle = true;
+        return { role: 'title', headingLevel: 1, cleanText: text };
+      }
+    }
+  }
+
+  // 6. Numbered Sub-sub-sections (H3): e.g. "1.1.1 Overview", "(a) Item", "(1) Item"
+  if (text.length <= 90 && !endsInPunctuation) {
+    if (/^\d+\.\d+\.\d+\.?\s+[A-Za-z]/.test(text) || /^\([a-z0-9]+\)\s+[A-Za-z]/i.test(text)) {
+      state.lastHeadingLevel = 3;
+      return { role: 'sub', headingLevel: 3, cleanText: text };
+    }
+  }
+
+  // 7. Numbered Sub-sections (H2): e.g. "1.1 Background", "2.3 Implementation", "a) Setup", "Step 1:"
+  if (text.length <= 90 && !endsInPunctuation) {
+    if (
+      /^\d+\.\d+\.?\s+[A-Za-z]/.test(text) ||
+      /^[a-z]\)\s+[A-Za-z]/.test(text) ||
+      /^(?:Sub-?section|Sub-?topic|Step)\s+(?:\d+|[A-Za-z0-9.]+)/i.test(text)
+    ) {
+      state.lastHeadingLevel = 2;
+      return { role: 'sub', headingLevel: 2, cleanText: text };
+    }
+  }
+
+  // 8. Numbered Main Sections (H1): e.g. "1. Introduction", "2. Architecture", "I. Executive Summary", "A. Background"
+  if (text.length <= 90 && !endsInPunctuation) {
+    if (
+      /^(?:\d+|[A-Z]|[IVXLCDM]+)\.\s+[A-Z]/.test(text) ||
+      /^(?:Section|Chapter|Part|Module|Unit|Phase)\s+(?:\d+|[A-Z]|[IVXLCDM]+)[:.\s–—]/i.test(text)
+    ) {
+      state.lastHeadingLevel = 1;
+      return { role: 'heading1', headingLevel: 1, cleanText: text };
+    }
+  }
+
+  // 9. Typographic & Font styling cues from Google Docs:
+  let isEntirelyBold = false;
+  let maxFontSize = 0;
+  try {
+    const textObj = p.editAsText();
+    if (textObj.getText().length > 0) {
+      isEntirelyBold = textObj.isBold() === true;
+      maxFontSize = Number(textObj.getFontSize(0)) || 0;
+    }
+  } catch(e) {}
+
+  if (maxFontSize >= 22 && text.length <= 110 && !endsInPunctuation) {
+    state.hasTitle = true;
+    return { role: 'title', headingLevel: 1, cleanText: text };
+  }
+
+  if (isEntirelyBold && text.length <= 80 && !endsInPunctuation) {
+    if (state.lastHeadingLevel === 1 && text.length < 50) {
+      state.lastHeadingLevel = 2;
+      return { role: 'sub', headingLevel: 2, cleanText: text };
+    }
+    state.lastHeadingLevel = 1;
+    return { role: 'heading1', headingLevel: 1, cleanText: text };
+  }
+
+  if (maxFontSize >= 16 && text.length <= 80 && !endsInPunctuation) {
+    state.lastHeadingLevel = 1;
+    return { role: 'heading1', headingLevel: 1, cleanText: text };
+  }
+  if (maxFontSize >= 13 && text.length <= 80 && !endsInPunctuation) {
+    state.lastHeadingLevel = 2;
+    return { role: 'sub', headingLevel: 2, cleanText: text };
+  }
+
+  // 10. ALL CAPS Standalone Headings (H1): e.g. "EXECUTIVE SUMMARY", "METHODOLOGY", "RESULTS"
+  if (text.length >= 3 && text.length <= 55 && !endsInPunctuation) {
+    if (/^[A-Z0-9\s&,/:–—\-]+$/.test(text) && /[A-Z]{2,}/.test(text)) {
+      state.lastHeadingLevel = 1;
+      return { role: 'heading1', headingLevel: 1, cleanText: text };
+    }
+  }
+
+  // 11. Title Case Short Headers without punctuation (e.g. "Key Architecture Overview")
+  if (text.length >= 4 && text.length <= 65 && !endsInPunctuation) {
+    const words = text.split(/\s+/);
+    if (words.length >= 2 && words.length <= 8) {
+      const majorWords = words.filter(w => !['and','or','the','in','on','at','to','for','with','of','a','an'].includes(w.toLowerCase()));
+      const capCount = majorWords.filter(w => /^[A-Z]/.test(w)).length;
+      if (majorWords.length > 0 && capCount / majorWords.length >= 0.8) {
+        const hasCommonVerb = words.some(w => ['is','are','was','were','has','have','can','could','should','will','would'].includes(w.toLowerCase()));
+        if (!hasCommonVerb) {
+          const role = (state.lastHeadingLevel === 1) ? 'sub' : 'heading1';
+          state.lastHeadingLevel = (role === 'sub') ? 2 : 1;
+          return { role: role, headingLevel: (role === 'sub') ? 2 : 1, cleanText: text };
+        }
+      }
+    }
+  }
+
+  return { role: 'body', headingLevel: 0, cleanText: text };
+}
+
+/**
+ * Formats all headings and optionally body text according to typography options,
+ * with intelligent full-document structure and role auto-detection.
  */
 function formatDocumentTypography(options) {
   options = options || getTypographyPreferences();
@@ -1262,15 +1607,17 @@ function formatDocumentTypography(options) {
   const doc = DocumentApp.getActiveDocument();
   const body = doc.getBody();
 
-  // First unroll any existing heading banner tables so headings are standard body paragraphs
-  unrollHeadingBannerTables(body);
+  // 1. Unroll any existing heading banner tables so headings are standard body paragraphs
+  try {
+    unrollHeadingBannerTables(body);
+  } catch(e) {}
 
   let titleCount = 0;
   let h1Count = 0;
   let subCount = 0;
   let bodyCount = 0;
 
-  // Collect candidate paragraphs from body
+  // 2. Scan and classify all paragraphs
   const numChildren = body.getNumChildren();
   const paragraphs = [];
   for (let i = 0; i < numChildren; i++) {
@@ -1280,34 +1627,53 @@ function formatDocumentTypography(options) {
     }
   }
 
+  const state = { hasTitle: false, lastHeadingLevel: 0 };
+  let firstNonEmptyFound = false;
+
   for (let i = 0; i < paragraphs.length; i++) {
     const p = paragraphs[i];
     if (!p.getParent()) continue;
 
-    const heading = p.getHeading();
+    // Skip items already inside a table cell (e.g. data tables, code blocks)
+    if (p.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) {
+      continue;
+    }
 
-    if (heading === DocumentApp.ParagraphHeading.TITLE) {
+    const rawText = p.getText();
+    const trimmed = rawText.trim();
+    if (trimmed.length === 0) continue;
+
+    const isFirstNonEmpty = !firstNonEmptyFound;
+    if (isFirstNonEmpty) firstNonEmptyFound = true;
+
+    // Detect role for this paragraph
+    const detection = detectTextRole(p, trimmed, isFirstNonEmpty, state);
+
+    // Apply cleaned text if markdown markers were stripped
+    if (detection.cleanText && detection.cleanText !== trimmed) {
+      p.setText(detection.cleanText);
+    }
+
+    if (detection.role === 'title') {
+      safeSetHeading(p, getHeadingConstant('TITLE'));
       formatSingleHeading(body, p, options.title);
       titleCount++;
-    } else if (heading === DocumentApp.ParagraphHeading.HEADING_1) {
+    } else if (detection.role === 'heading1') {
+      safeSetHeading(p, getHeadingConstant('HEADING1'));
       formatSingleHeading(body, p, options.heading1);
       h1Count++;
-    } else if (
-      heading === DocumentApp.ParagraphHeading.HEADING_2 ||
-      heading === DocumentApp.ParagraphHeading.HEADING_3 ||
-      heading === DocumentApp.ParagraphHeading.SUBTITLE ||
-      heading === DocumentApp.ParagraphHeading.HEADING_4 ||
-      heading === DocumentApp.ParagraphHeading.HEADING_5 ||
-      heading === DocumentApp.ParagraphHeading.HEADING_6
-    ) {
+    } else if (detection.role === 'sub') {
+      const headingLevelEnum = detection.headingLevel === 3
+        ? getHeadingConstant('HEADING3')
+        : getHeadingConstant('HEADING2');
+      safeSetHeading(p, headingLevelEnum);
       formatSingleHeading(body, p, options.subHeading);
       subCount++;
-    } else if (heading === DocumentApp.ParagraphHeading.NORMAL) {
+    } else if (detection.role === 'body') {
+      safeSetHeading(p, getHeadingConstant('NORMAL'));
       if (options.body && options.body.applyToBody) {
-        if (p.getText().trim().length > 0) {
-          formatSingleBodyParagraph(p, options.body);
-          bodyCount++;
-        }
+        formatSingleBodyParagraph(p, options.body);
+        bodyCount++;
       }
     }
   }
@@ -1323,12 +1689,12 @@ function formatDocumentTypography(options) {
     count: titleCount + h1Count + subCount + bodyCount,
     message: parts.length > 0
       ? 'Formatted ' + parts.join(', ') + ' successfully!'
-      : 'No matching headings or body paragraphs found to format.'
+      : 'No text was formatted. Ensure "Apply to General Body Text" is checked if formatting normal text.'
   };
 }
 
 /**
- * Formats the selected text or paragraph
+ * Formats the selected text or paragraph with intelligent auto-detection of role
  */
 function formatSelectedTypography(options) {
   options = options || getTypographyPreferences();
@@ -1344,6 +1710,96 @@ function formatSelectedTypography(options) {
   }
 
   const elements = selection.getSelectedElements();
+  const body = doc.getBody();
+  let titleCount = 0;
+  let h1Count = 0;
+  let subCount = 0;
+  let bodyCount = 0;
+
+  const state = { hasTitle: false, lastHeadingLevel: 0 };
+  let firstNonEmptyFound = false;
+
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    let p = null;
+    if (el.getElement().getType() === DocumentApp.ElementType.PARAGRAPH) {
+      p = el.getElement().asParagraph();
+    } else if (el.getElement().getType() === DocumentApp.ElementType.TEXT) {
+      const parent = el.getElement().getParent();
+      if (parent.getType() === DocumentApp.ElementType.PARAGRAPH) {
+        p = parent.asParagraph();
+      }
+    }
+
+    if (!p) continue;
+    const text = p.getText().trim();
+    if (text.length === 0) continue;
+
+    const isFirstNonEmpty = !firstNonEmptyFound;
+    if (isFirstNonEmpty) firstNonEmptyFound = true;
+
+    // Run auto-detection on this selected element
+    const detection = detectTextRole(p, text, isFirstNonEmpty, state);
+
+    if (detection.cleanText && detection.cleanText !== text) {
+      p.setText(detection.cleanText);
+    }
+
+    if (detection.role === 'title') {
+      safeSetHeading(p, getHeadingConstant('TITLE'));
+      applyHeadingStyles(p, options.title, options.title.bgEnabled && options.title.bgStyle === 'inline' ? options.title.bgColor : null);
+      titleCount++;
+    } else if (detection.role === 'heading1') {
+      safeSetHeading(p, getHeadingConstant('HEADING1'));
+      applyHeadingStyles(p, options.heading1, options.heading1.bgEnabled && options.heading1.bgStyle === 'inline' ? options.heading1.bgColor : null);
+      h1Count++;
+    } else if (detection.role === 'sub') {
+      const hLevelEnum = detection.headingLevel === 3
+        ? getHeadingConstant('HEADING3')
+        : getHeadingConstant('HEADING2');
+      safeSetHeading(p, hLevelEnum);
+      applyHeadingStyles(p, options.subHeading, options.subHeading.bgEnabled && options.subHeading.bgStyle === 'inline' ? options.subHeading.bgColor : null);
+      subCount++;
+    } else {
+      safeSetHeading(p, getHeadingConstant('NORMAL'));
+      formatSingleBodyParagraph(p, options.body);
+      bodyCount++;
+    }
+  }
+
+  const parts = [];
+  if (titleCount > 0) parts.push(titleCount + ' title');
+  if (h1Count > 0) parts.push(h1Count + ' main heading(s)');
+  if (subCount > 0) parts.push(subCount + ' sub-heading(s)');
+  if (bodyCount > 0) parts.push(bodyCount + ' body paragraph(s)');
+
+  return {
+    success: true,
+    count: titleCount + h1Count + subCount + bodyCount,
+    message: parts.length > 0
+      ? 'Auto-formatted selection: ' + parts.join(', ') + '!'
+      : 'No text elements could be formatted from selection.'
+  };
+}
+
+/**
+ * Formats currently selected text as a specific typography element (title, heading1, sub, or body)
+ */
+function formatSelectedAs(targetType, options) {
+  options = options || getTypographyPreferences();
+  saveTypographyPreferences(options);
+
+  const doc = DocumentApp.getActiveDocument();
+  const selection = doc.getSelection();
+  if (!selection) {
+    return {
+      success: false,
+      message: 'Please highlight or select text in your document first.'
+    };
+  }
+
+  const elements = selection.getSelectedElements();
+  const body = doc.getBody();
   let count = 0;
 
   for (let i = 0; i < elements.length; i++) {
@@ -1360,37 +1816,38 @@ function formatSelectedTypography(options) {
 
     if (!p) continue;
 
-    const heading = p.getHeading();
-    if (heading === DocumentApp.ParagraphHeading.TITLE) {
-      applyHeadingStyles(p, options.title, options.title.bgEnabled && options.title.bgStyle === 'inline' ? options.title.bgColor : null);
+    if (targetType === 'title') {
+      safeSetHeading(p, getHeadingConstant('TITLE'));
+      formatSingleHeading(body, p, options.title);
       count++;
-    } else if (heading === DocumentApp.ParagraphHeading.HEADING_1) {
-      applyHeadingStyles(p, options.heading1, options.heading1.bgEnabled && options.heading1.bgStyle === 'inline' ? options.heading1.bgColor : null);
+    } else if (targetType === 'heading1') {
+      safeSetHeading(p, getHeadingConstant('HEADING1'));
+      formatSingleHeading(body, p, options.heading1);
       count++;
-    } else if (
-      heading === DocumentApp.ParagraphHeading.HEADING_2 ||
-      heading === DocumentApp.ParagraphHeading.HEADING_3 ||
-      heading === DocumentApp.ParagraphHeading.SUBTITLE ||
-      heading === DocumentApp.ParagraphHeading.HEADING_4 ||
-      heading === DocumentApp.ParagraphHeading.HEADING_5 ||
-      heading === DocumentApp.ParagraphHeading.HEADING_6
-    ) {
-      applyHeadingStyles(p, options.subHeading, options.subHeading.bgEnabled && options.subHeading.bgStyle === 'inline' ? options.subHeading.bgColor : null);
+    } else if (targetType === 'sub') {
+      safeSetHeading(p, getHeadingConstant('HEADING2'));
+      formatSingleHeading(body, p, options.subHeading);
       count++;
-    } else {
-      if (options.body && options.body.applyToBody) {
-        formatSingleBodyParagraph(p, options.body);
-        count++;
-      }
+    } else if (targetType === 'body') {
+      safeSetHeading(p, getHeadingConstant('NORMAL'));
+      formatSingleBodyParagraph(p, options.body);
+      count++;
     }
   }
 
+  const labelMap = {
+    title: 'Document Title',
+    heading1: 'Heading 1',
+    sub: 'Sub-Heading',
+    body: 'Body Text'
+  };
+
   return {
-    success: true,
+    success: count > 0,
     count: count,
     message: count > 0
-      ? 'Formatted ' + count + ' selected element(s) successfully!'
-      : 'No text was formatted. If formatting body text, ensure "Apply to General Body Text" is checked.'
+      ? 'Applied ' + (labelMap[targetType] || targetType) + ' formatting to ' + count + ' selected element(s)!'
+      : 'No text element could be formatted from selection.'
   };
 }
 
@@ -1401,7 +1858,7 @@ function formatSingleHeading(body, p, config) {
   if (!config) return;
 
   const bgEnabled = !!config.bgEnabled;
-  const bgStyle = config.bgStyle || 'banner';
+  const bgStyle = config.bgStyle || 'inline';
   const bgColor = config.bgColor || '#EFF6FF';
 
   let targetPara = p;
@@ -1417,35 +1874,45 @@ function formatSingleHeading(body, p, config) {
  * Wraps a paragraph into a full-width borderless 1x1 table banner
  */
 function wrapParagraphInBanner(body, p, bgColor) {
-  const parent = p.getParent();
-  if (parent.getType() !== DocumentApp.ElementType.BODY_SECTION) {
+  try {
+    const parent = p.getParent();
+    if (parent.getType() !== DocumentApp.ElementType.BODY_SECTION) {
+      return p;
+    }
+
+    const childIndex = body.getChildIndex(p);
+    const headingType = p.getHeading();
+    const text = p.getText();
+
+    // In Google Apps Script, body.insertTable(childIndex) creates a table at childIndex
+    const table = body.insertTable(childIndex);
+    table.setBorderWidth(0);
+    try { table.setBorderColor(bgColor); } catch(e) {}
+
+    const row = table.appendTableRow();
+    const cell = row.appendTableCell();
+    cell.setBackgroundColor(bgColor);
+    cell.setPaddingTop(8);
+    cell.setPaddingBottom(8);
+    cell.setPaddingLeft(12);
+    cell.setPaddingRight(12);
+    cell.setVerticalAlignment(DocumentApp.VerticalAlignment.TOP);
+
+    const cellPara = cell.getChild(0).asParagraph();
+    cellPara.setText(text);
+
+    try {
+      const pageWidth = body.getPageWidth();
+      const marginLeft = body.getMarginLeft();
+      const marginRight = body.getMarginRight();
+      table.setColumnWidth(0, Math.max(100, pageWidth - marginLeft - marginRight));
+    } catch(e) {}
+
+    p.removeFromParent();
+    return cellPara;
+  } catch(err) {
     return p;
   }
-
-  const childIndex = body.getChildIndex(p);
-  const headingType = p.getHeading();
-  const text = p.getText();
-
-  const table = body.insertTable(childIndex, [[ '' ]]);
-  table.setBorderWidth(0);
-  table.setBorderColor(bgColor);
-
-  const cell = table.getRow(0).getCell(0);
-  cell.setBackgroundColor(bgColor);
-  cell.setPaddingTop(8);
-  cell.setPaddingBottom(8);
-  cell.setPaddingLeft(12);
-  cell.setPaddingRight(12);
-  cell.setVerticalAlignment(DocumentApp.VerticalAlignment.TOP);
-
-  const cellPara = cell.getChild(0).asParagraph();
-  cellPara.setHeading(headingType);
-  cellPara.setText(text);
-
-  centerTableOnPage(table, body);
-
-  p.removeFromParent();
-  return cellPara;
 }
 
 /**
@@ -1470,12 +1937,23 @@ function applyHeadingStyles(para, config, inlineBgColor) {
   para.setLineSpacing(1.15);
 
   const textObj = para.editAsText();
-  if (textObj.getText().length > 0) {
-    try { textObj.setFontFamily(fontFamily); } catch(e) {}
-    try { textObj.setFontSize(fontSize); } catch(e) {}
-    try { textObj.setBold(bold); } catch(e) {}
-    try { textObj.setForegroundColor(textColor); } catch(e) {}
-    try { textObj.setBackgroundColor(inlineBgColor || null); } catch(e) {}
+  const textLen = textObj.getText().length;
+  if (textLen > 0) {
+    try { textObj.setFontFamily(0, textLen - 1, fontFamily); } catch(e) {
+      try { textObj.setFontFamily(fontFamily); } catch(e2) {}
+    }
+    try { textObj.setFontSize(0, textLen - 1, fontSize); } catch(e) {
+      try { textObj.setFontSize(fontSize); } catch(e2) {}
+    }
+    try { textObj.setBold(0, textLen - 1, bold); } catch(e) {
+      try { textObj.setBold(bold); } catch(e2) {}
+    }
+    try { textObj.setForegroundColor(0, textLen - 1, textColor); } catch(e) {
+      try { textObj.setForegroundColor(textColor); } catch(e2) {}
+    }
+    try { textObj.setBackgroundColor(0, textLen - 1, inlineBgColor || null); } catch(e) {
+      try { textObj.setBackgroundColor(inlineBgColor || null); } catch(e2) {}
+    }
   }
 }
 
@@ -1500,12 +1978,51 @@ function formatSingleBodyParagraph(para, config) {
   para.setLineSpacing(1.15);
 
   const textObj = para.editAsText();
-  if (textObj.getText().length > 0) {
-    try { textObj.setFontFamily(fontFamily); } catch(e) {}
-    try { textObj.setFontSize(fontSize); } catch(e) {}
-    try { textObj.setBold(false); } catch(e) {}
-    try { textObj.setForegroundColor(textColor); } catch(e) {}
-    try { textObj.setBackgroundColor(null); } catch(e) {}
+  const textLen = textObj.getText().length;
+  if (textLen > 0) {
+    try { textObj.setFontFamily(0, textLen - 1, fontFamily); } catch(e) {
+      try { textObj.setFontFamily(fontFamily); } catch(e2) {}
+    }
+    try { textObj.setFontSize(0, textLen - 1, fontSize); } catch(e) {
+      try { textObj.setFontSize(fontSize); } catch(e2) {}
+    }
+    try { textObj.setBold(0, textLen - 1, false); } catch(e) {
+      try { textObj.setBold(false); } catch(e2) {}
+    }
+    try { textObj.setForegroundColor(0, textLen - 1, textColor); } catch(e) {
+      try { textObj.setForegroundColor(textColor); } catch(e2) {}
+    }
+    try { textObj.setBackgroundColor(0, textLen - 1, null); } catch(e) {
+      try { textObj.setBackgroundColor(null); } catch(e2) {}
+    }
+
+    // Automatically detect and highlight inline code tokens (`code`)
+    applyInlineBodyCodeHighlight(textObj);
+  }
+}
+
+/**
+ * Detects backtick-wrapped tokens (e.g. `npm install` or `myVar`) in body text
+ * and applies clean monospace font (Consolas) with subtle background shading.
+ */
+function applyInlineBodyCodeHighlight(textObj) {
+  const fullText = textObj.getText();
+  if (!fullText || fullText.length === 0) return;
+
+  const codeFont = 'Consolas';
+  const codeColor = '#B45309';
+  const codeBg = '#EFF1F3';
+
+  const backtickRegex = /`([^`]+)`/g;
+  let match;
+  while ((match = backtickRegex.exec(fullText)) !== null) {
+    const start = match.index;
+    const end = start + match[0].length - 1;
+    try {
+      textObj.setFontFamily(start, end, codeFont);
+      textObj.setForegroundColor(start, end, codeColor);
+      textObj.setBackgroundColor(start, end, codeBg);
+    } catch(e) {}
   }
 }
 
@@ -1544,7 +2061,7 @@ function unrollSingleHeadingBanner(body, table) {
       const heading = p.getHeading();
       if (i === 0 && text === '' && numChildren > 1) continue;
       const newP = body.insertParagraph(insertIndex + createdParas.length, text);
-      newP.setHeading(heading);
+      safeSetHeading(newP, heading);
       createdParas.push(newP);
     }
   }
@@ -1583,13 +2100,13 @@ function undoDocumentTypography() {
       if (heading === DocumentApp.ParagraphHeading.TITLE) {
         defaultSize = 26;
         defaultBold = true;
-      } else if (heading === DocumentApp.ParagraphHeading.HEADING_1) {
+      } else if (heading === (DocumentApp.ParagraphHeading.HEADING1 || DocumentApp.ParagraphHeading.HEADING_1)) {
         defaultSize = 20;
         defaultBold = true;
-      } else if (heading === DocumentApp.ParagraphHeading.HEADING_2) {
+      } else if (heading === (DocumentApp.ParagraphHeading.HEADING2 || DocumentApp.ParagraphHeading.HEADING_2)) {
         defaultSize = 16;
         defaultBold = true;
-      } else if (heading === DocumentApp.ParagraphHeading.HEADING_3) {
+      } else if (heading === (DocumentApp.ParagraphHeading.HEADING3 || DocumentApp.ParagraphHeading.HEADING_3)) {
         defaultSize = 14;
         defaultBold = true;
         defaultColor = '#434343';
@@ -1639,7 +2156,7 @@ function getTypographyPreferences() {
       bold: true,
       bgEnabled: false,
       bgColor: '#EFF6FF',
-      bgStyle: 'banner'
+      bgStyle: 'inline'
     },
     heading1: {
       fontFamily: 'Montserrat',
@@ -1649,7 +2166,7 @@ function getTypographyPreferences() {
       bold: true,
       bgEnabled: true,
       bgColor: '#EFF6FF',
-      bgStyle: 'banner'
+      bgStyle: 'inline'
     },
     subHeading: {
       fontFamily: 'Montserrat',
@@ -2005,6 +2522,20 @@ function getSidebarHtml() {
       </head>
       <body>
 
+        <!-- Master 1-Click Smart Auto-Formatter Card -->
+        <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; color: #ffffff; text-align: center; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">
+          <div style="font-weight: 700; font-size: 13px; margin-bottom: 2px; display:flex; align-items:center; justify-content:center; gap:6px;">
+            <span>🚀</span> Smart Auto-Format
+          </div>
+          <div style="font-size: 11px; opacity: 0.9; margin-bottom: 8px;">
+            Auto-detects Title, Headings, Code &amp; Tables
+          </div>
+          <button id="btnSmartAutoFormat" onclick="runSmartAutoFormat()" style="width: 100%; border: none; background: #ffffff; color: #1e3a8a; font-weight: 700; font-size: 12px; padding: 7px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s ease;">
+            ⚡ Auto-Format Entire Document
+          </button>
+          <div id="smartAutoStatus" class="status-box" style="display:none; margin-top: 8px; text-align: left; background:#ffffff; color:#1e293b;"></div>
+        </div>
+
         <!-- Navigation Tabs -->
         <div class="tab-header">
           <button class="tab-btn active" id="tabBtnTypography" onclick="switchTab('typography')">
@@ -2112,7 +2643,7 @@ function getSidebarHtml() {
           <!-- Main Heading 1 Card -->
           <div class="typo-card">
             <div class="typo-card-header">
-              <span class="typo-card-title">📌 Heading 1 (HEADING_1)</span>
+              <span class="typo-card-title">📌 Main Heading 1</span>
               <label class="checkbox-label"><input type="checkbox" id="typoH1BgToggle" checked onchange="updateTypographyPreview()"> Add Background</label>
             </div>
             <div class="row-2col">
@@ -2335,11 +2866,19 @@ function getSidebarHtml() {
             </div>
           </div>
 
-          <button class="btn-primary" id="btnFormatDocTypo" onclick="runFormatDocumentTypography()">
-            <span>✍️</span> Format Document Typography
-          </button>
-          <button class="btn-secondary" id="btnFormatSelectedTypo" onclick="runFormatSelectedTypography()">
-            Format Selected Text Only
+          <div class="section-title">⚡ Quick Format for Selection</div>
+          <button type="button" class="btn-primary" id="btnFormatSelectedTypo" style="margin-top:0; width:100%; margin-bottom:6px;" onclick="runFormatSelectedTypography()">✍️ Auto-Detect &amp; Format Selection</button>
+          <div class="row-2col">
+            <button type="button" class="btn-secondary" style="margin-top:0;" onclick="runFormatSelectedAs('title')">📖 Apply as Title</button>
+            <button type="button" class="btn-secondary" style="margin-top:0;" onclick="runFormatSelectedAs('heading1')">📌 Apply as Heading 1</button>
+          </div>
+          <div class="row-2col" style="margin-top:4px;">
+            <button type="button" class="btn-secondary" style="margin-top:0;" onclick="runFormatSelectedAs('sub')">📑 Apply as Sub-Heading</button>
+            <button type="button" class="btn-secondary" style="margin-top:0;" onclick="runFormatSelectedAs('body')">📝 Apply as Body</button>
+          </div>
+
+          <button class="btn-primary" id="btnFormatDocTypo" onclick="runFormatDocumentTypography()" style="margin-top:10px;">
+            <span>✍️</span> Format All Document Typography
           </button>
           <button class="btn-danger" id="btnUndoDocTypo" onclick="runUndoDocumentTypography()">
             <span>↩</span> Undo Document Text Formatting
@@ -2977,6 +3516,34 @@ function getSidebarHtml() {
             el.innerText = msg;
           }
 
+          function runSmartAutoFormat() {
+            const statusEl = document.getElementById('smartAutoStatus');
+            if (statusEl) {
+              statusEl.style.display = 'block';
+              statusEl.className = 'status-box loading';
+              statusEl.innerText = 'Scanning & auto-formatting entire document...';
+            }
+            const btn = document.getElementById('btnSmartAutoFormat');
+            if (btn) btn.disabled = true;
+
+            google.script.run
+              .withSuccessHandler(res => {
+                if (btn) btn.disabled = false;
+                if (statusEl) {
+                  statusEl.className = 'status-box ' + (res.success ? 'success' : 'error');
+                  statusEl.innerText = res.message;
+                }
+              })
+              .withFailureHandler(err => {
+                if (btn) btn.disabled = false;
+                if (statusEl) {
+                  statusEl.className = 'status-box error';
+                  statusEl.innerText = 'Error: ' + err;
+                }
+              })
+              .smartAutoFormatEntireDocument(getCodeOptions(), getTableOptions(), getTypographyOptions());
+          }
+
           function runFormatDocumentTypography() {
             setTypographyStatus('Formatting document typography...', 'loading');
             document.getElementById('btnFormatDocTypo').disabled = true;
@@ -2993,15 +3560,16 @@ function getSidebarHtml() {
           }
 
           function runFormatSelectedTypography() {
-            setTypographyStatus('Formatting selected text typography...', 'loading');
-            document.getElementById('btnFormatSelectedTypo').disabled = true;
+            setTypographyStatus('Auto-formatting selected text...', 'loading');
+            const btn = document.getElementById('btnFormatSelectedTypo');
+            if (btn) btn.disabled = true;
             google.script.run
               .withSuccessHandler(res => {
-                document.getElementById('btnFormatSelectedTypo').disabled = false;
+                if (btn) btn.disabled = false;
                 setTypographyStatus(res.message, res.success ? 'success' : 'error');
               })
               .withFailureHandler(err => {
-                document.getElementById('btnFormatSelectedTypo').disabled = false;
+                if (btn) btn.disabled = false;
                 setTypographyStatus('Error: ' + err, 'error');
               })
               .formatSelectedTypography(getTypographyOptions());
@@ -3023,6 +3591,18 @@ function getSidebarHtml() {
                 setTypographyStatus('Error: ' + err, 'error');
               })
               .undoDocumentTypography();
+          }
+
+          function runFormatSelectedAs(targetType) {
+            setTypographyStatus('Applying ' + targetType + ' formatting to selected text...', 'loading');
+            google.script.run
+              .withSuccessHandler(res => {
+                setTypographyStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                setTypographyStatus('Error: ' + err, 'error');
+              })
+              .formatSelectedAs(targetType, getTypographyOptions());
           }
 
           /* =========================================================

@@ -103,27 +103,37 @@ clasp push
 
 ## 📖 How to Use
 
-### 1. Format Document Typography
-- Click **⚡ Code, Table & Typography Suite** > **✍️ Format Document Typography**.
-- Your document Title, Heading 1s, Sub-headings (H2, H3, Subtitle), and body paragraphs will be styled with your chosen theme, fonts, colors, and background banners.
-- Or highlight any passage and click **✍️ Format Selected Text Only**.
+### 1. 🚀 1-Click Smart Auto-Format Entire Document (All-in-One)
+- Click **⚡ Code, Table & Typography Suite** > **🚀 Smart Auto-Format Entire Document** (or click the top banner button in the sidebar).
+- Intelligently scans the entire document to auto-detect what formatting to apply:
+  - **Code Blocks**: Detects markdown fenced blocks (\`\`\`) and programming syntax &rarr; converts to styled, auto-indented code block tables.
+  - **Data Tables**: Detects data tables &rarr; centers across margins and applies colorful header and zebra striping.
+  - **Document Titles**: Detects titles by position, \`#\` prefix, or \`Title:\` tags &rarr; applies selected Title typography & banners.
+  - **Headings & Sub-Headings**: Detects \`#\`, \`##\`, \`###\`, numbered sections (\`1. Introduction\`, \`1.1 Overview\`, \`1.1.1 Details\`, \`Section 1:\`, \`Step 1:\`), outline letters (\`A.\`, \`a)\`, \`(1)\`), ALL-CAPS headers, and bold standalone lines &rarr; styles as Heading 1 or Sub-headings.
+  - **Body Text**: Applies clean body typography and automatically detects inline code tokens (\`code\`) with monospace highlight.
 
-### 2. Format & Center All Tables
+### 2. Format Document Typography
+- Click **⚡ Code, Table & Typography Suite** > **✍️ Format Document Typography**.
+- Your document Title, Heading 1s, Sub-headings (H2, H3, Subtitle), and body paragraphs will be auto-detected and styled with your chosen theme, fonts, colors, and background banners.
+- Or highlight any passage and click **✍️ Format Selected Text Auto** to auto-detect and format only the selected lines.
+
+### 3. Format & Center All Tables
 - Click **⚡ Code, Table & Typography Suite** > **📊 Format & Center All Tables**.
 - All data tables will instantly be aligned in the middle of the page and styled with colorful headers, zebra striping, and clean borders.
 
-### 3. Open the Interactive 3-Tab Sidebar
+### 4. Open the Interactive 3-Tab Sidebar
 - Click **⚡ Code, Table & Typography Suite** > **Open Sidebar (Styles & Colors)**.
 - Switch between **✍️ Typography**, **📊 Tables**, and **⚡ Code** tabs:
-  - **Typography Tab**: Select a preset (Executive Navy, Modern Tech, etc.) or customize title/heading/subheading colors, fonts, sizes, and banner styles with a live document preview.
+  - **Top Banner**: 1-Click **⚡ Auto-Format Entire Document**.
+  - **Typography Tab**: Select a preset (Executive Navy, Modern Tech, etc.) or customize title/heading/subheading colors, fonts, sizes, and banner styles with a live document preview. Includes **✍️ Auto-Detect & Format Selection**.
   - **Tables Tab**: Choose your color theme (Corporate Navy, Emerald Mint, Royal Indigo, etc.), cell alignment, and padding with a real-time live table preview. Includes **↩ Undo All Tables Formatting** and **Undo Selected Table Only**.
   - **Code Tab**: Pick syntax themes (GitHub Light, Dracula, Monokai), monospace font, and **Code Indentation** (Smart 2-Space, 4-Space, or Tab conversion). Includes **📐 Auto-Indent All Code Blocks**, **↩ Undo All Code Blocks Formatting**, and **Undo Selected Code Block**.
 
-### 4. Highlight & Indent Code Blocks
+### 5. Highlight & Indent Code Blocks
 - Click **⚡ Code, Table & Typography Suite** > **⚡ Highlight All Code (Quick Run)**, or select code and click **Highlight Selected Code**.
-- Code blocks are automatically indented according to your chosen indentation preference.
+- Code blocks are automatically indented according to your chosen indentation preference. Fenced code blocks (\`\`\`) are cleanly parsed with fence markers stripped.
 
-### 5. Undo Formatting Anytime
+### 6. Undo Formatting Anytime
 - Click **↩ Undo Document Text Formatting** to revert titles, headings, and body paragraphs back to clean Google Docs defaults and unroll banner tables.
 - Click **↩ Undo All Tables Formatting** to revert tables back to standard document defaults.
 - Click **↩ Undo All Code Blocks Formatting** to convert 1x1 code block containers back to normal paragraphs.

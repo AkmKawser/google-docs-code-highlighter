@@ -1,6 +1,6 @@
-# ⚡ Google Docs Code Highlighter
+# ⚡ Google Docs Code Highlighter & Table Formatter
 
-> A smart Google Apps Script tool that automatically detects, highlights, and styles code blocks inside Google Docs — with a custom styling sidebar, preset themes, and zero markdown backticks required.
+> A smart Google Apps Script tool that automatically highlights code blocks, formats tables with professional colorful themes & zebra striping, and aligns everything in the middle of your Google Docs — with a dual-tab sidebar and zero markdown backticks required.
 
 ![Google Apps Script](https://img.shields.io/badge/Google%20Apps%20Script-4285F4?style=for-the-badge&logo=google&logoColor=white)
 ![Google Docs](https://img.shields.io/badge/Google%20Docs-0F9D58?style=for-the-badge&logo=googledocs&logoColor=white)
@@ -10,17 +10,35 @@
 
 ## ✨ Features
 
+### 📊 Professional Table Formatter & Middle-of-Page Alignment
+- **📐 Automatic Middle Alignment**: Calculates page width and margins (`pageWidth - marginLeft - marginRight`) to center-align all tables symmetrically across the printable page with proportional column sizing.
+- **🎨 Colorful Professional Themes**:
+  - **Corporate Navy**: Deep royal navy headers with crisp ice-blue zebra striping.
+  - **Emerald Mint**: Modern forest green headers with fresh mint alternating rows.
+  - **Royal Indigo**: Deep violet headers with subtle lilac accents.
+  - **Sunset Crimson**: Rich ruby red headers with warm rose striping.
+  - **Ocean Teal**: Deep cyan/teal headers with aqua accents.
+  - **Executive Slate**: Sleek charcoal headers with cool gray striping.
+  - **Custom Palette**: Full RGB control over Header Background, Header Text, Alternating Row, Base Row, and Border colors.
+- **🦓 Smart Alternating Rows (Zebra Striping)**: Enhanced visual rhythm for scanning rows and dense data grids.
+- **🎯 Intelligent Cell Typography & Alignment**:
+  - **Font Families**: Roboto, Arial, Inter, Open Sans, Lato, Montserrat, Calibri, Trebuchet MS, Georgia, Merriweather, Times New Roman, or Consolas.
+  - **Header Row**: Middle-aligned (centered) with larger bold typography (10.5–13pt).
+  - **Table Text (Data Rows)**: Strictly left-aligned (not centered or right-aligned) with clean body typography (8.5–10pt).
+  - **Table Element**: Centered on page across document margins.
+  - Refined cell padding (Compact, Normal, Relaxed) and soft borders.
+- **🛡️ Code Block Safety**: Automatically differentiates between regular data tables and code containers, keeping your syntax highlighting intact while centering both!
+
+---
+
+### ⚡ Smart Code Highlighter
 - **⚡ 1-Click Formatting**: Formats every code block in your entire document in one click.
 - **🔒 Curly Brace Tracking Engine**: Uses net `{` and `}` balance counting to guarantee functions, loops, and nested classes never get split into fragmented chunks, even across multiple blank lines.
 - **🚫 No Markdown Required**: You don't need to wrap code in triple backticks (\`\`\`). Simply paste your code anywhere in the document.
-- **🎨 Interactive Sidebar**:
-  - **Themes**: GitHub Light, Dracula Dark, Monokai Dark, Solarized Light, or Custom.
-  - **Font Size**: 8.5pt, 9.5pt, 10pt, 11pt, 12pt.
-  - **Font Families**: Consolas, Courier New, Roboto Mono.
-  - **Color Pickers**: Full custom control over Background, Text, and Border colors.
-  - **Live Preview Box**: See your code theme live before applying it.
+- **🎨 Interactive Sidebar Themes**: GitHub Light, Dracula Dark, Monokai Dark, Solarized Light, or Custom.
+- **🔤 Expanded Monospace Fonts**: Consolas, Roboto Mono, Courier New, Inconsolata, Source Code Pro, Space Mono, PT Mono, and Ubuntu Mono with font sizes from 8.5pt to 12pt.
 - **🧠 Prose Rejection Heuristics**: Distinguishes between actual code lines and natural conversational English sentences so regular text is never converted.
-- **💾 Auto-Saved Preferences**: Automatically remembers your chosen colors and font sizes for future sessions.
+- **💾 Auto-Saved Preferences**: Automatically remembers your chosen fonts, colors, padding, and font sizes for future sessions.
 
 ---
 
@@ -34,7 +52,7 @@
 4. Copy the entire content of [`Code.js`](./Code.js) and paste it into `Code.gs`.
 5. Press **`Ctrl + S`** (or click the disk icon) to save.
 6. Return to your Google Docs tab and **refresh the page** (`Ctrl + R` or `F5`).
-7. You will now see a new menu: **⚡ Code Highlighter** in the toolbar!
+7. You will now see a new menu: **⚡ Code & Table Tools** in the toolbar!
 
 ### Method 2: Google Clasp CLI
 
@@ -50,28 +68,36 @@ clasp push
 
 ## 📖 How to Use
 
-### 1. Open the Styles & Colors Sidebar
-- Click **⚡ Code Highlighter** > **Open Sidebar (Styles & Colors)**.
-- Choose your favorite theme (e.g. **Dracula Dark** or **GitHub Light**), select your font size, and preview it live.
-- Click **⚡ Highlight All Code**.
+### 1. Format & Center All Tables
+- Click **⚡ Code & Table Tools** > **📊 Format & Center All Tables**.
+- All data tables will instantly be aligned in the middle of the page and styled with colorful headers, zebra striping, and clean borders.
 
-### 2. Quick Highlight
-- If you already set your preferences, simply click **⚡ Code Highlighter** > **Highlight All Code (Quick Run)**.
+### 2. Format a Selected Table Only
+- Place your cursor inside any table in your document.
+- Click **⚡ Code & Table Tools** > **📊 Format Selected Table**.
 
-### 3. Highlight Selected Text Only
-- If you have a single snippet or terminal command you want to format immediately, highlight it with your cursor and click **Format Selected Text**.
+### 3. Open the Interactive Sidebar
+- Click **⚡ Code & Table Tools** > **Open Sidebar (Styles & Colors)**.
+- Switch between **📊 Tables** and **⚡ Code Blocks** tabs:
+  - **Tables Tab**: Choose your color theme (Corporate Navy, Emerald Mint, Royal Indigo, etc.), cell alignment, and padding with a real-time live table preview.
+  - **Code Tab**: Pick syntax themes (GitHub Light, Dracula, Monokai), font size, and live code preview.
+
+### 4. Highlight Code Blocks
+- Click **⚡ Code & Table Tools** > **⚡ Highlight All Code (Quick Run)**, or select code and click **Highlight Selected Code**.
 
 ---
 
-## 🎨 Supported Themes
+## 🎨 Supported Table Themes
 
-| Theme | Preview Style | Best For |
-|---|---|---|
-| **GitHub Light** | Light gray background, red/blue keywords, dark text | Clean notes & technical reports |
-| **Dracula Dark** | Dark purple background, pink/yellow syntax | Modern dark aesthetic |
-| **Monokai Dark** | Deep charcoal background, vibrant pink & green | Sublime/VS Code lovers |
-| **Solarized Light** | Warm cream background, cyan/blue syntax | High readability on white pages |
-| **Custom** | Fully customizable via RGB color pickers | Tailored brand palettes |
+| Theme | Header Color | Alternating Row | Best For |
+|---|---|---|---|
+| **Corporate Navy** | Royal Navy (`#1E3A8A`) | Ice Blue (`#F0F7FF`) | Executive summaries, business plans, reports |
+| **Emerald Mint** | Forest Green (`#065F46`) | Mint Tint (`#ECFDF5`) | Financial reports, spreadsheets, environment notes |
+| **Royal Indigo** | Deep Violet (`#4C1D95`) | Lavender (`#F5F3FF`) | Tech roadmaps, research papers, modern docs |
+| **Sunset Crimson** | Ruby Red (`#881337`) | Soft Rose (`#FFF1F2`) | Marketing plans, audits, status reports |
+| **Ocean Teal** | Cyan Teal (`#0F766E`) | Aqua Tint (`#F0FDFA`) | Analytics briefs, scientific docs, clean notes |
+| **Executive Slate** | Charcoal (`#1E293B`) | Off-White Slate (`#F8FAFC`) | Minimalist docs, formal agreements, whitepapers |
+| **Custom Palette** | Any RGB Color | Any RGB Color | Brand guides & custom color schemes |
 
 ---
 
@@ -79,9 +105,9 @@ clasp push
 
 ```text
 .
-├── Code.js            # Main Google Apps Script logic & UI sidebar
+├── Code.js            # Unified Apps Script logic for Tables & Code Blocks + Dual-tab UI Sidebar
 ├── appsscript.json    # Apps Script manifest file
-├── README.md          # Project documentation
+├── README.md          # Project documentation & user guide
 ├── LICENSE            # MIT License
 └── .gitignore         # Ignored files
 ```
@@ -90,7 +116,7 @@ clasp push
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](../../issues).
+Contributions, issues, and feature requests are welcome! Feel free to open an issue or pull request.
 
 ---
 

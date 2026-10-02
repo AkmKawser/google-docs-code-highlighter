@@ -412,13 +412,13 @@ function formatSingleTable(table, options, body) {
     for (let c = 0; c < cellsCount; c++) {
       const cell = row.getCell(c);
 
-      // Cell background, padding & vertical alignment
+      // Cell background, padding & vertical alignment (Always Top-aligned)
       cell.setBackgroundColor(rowBg);
       cell.setPaddingTop(isHeader ? padTop + 2 : padTop);
       cell.setPaddingBottom(isHeader ? padBottom + 2 : padBottom);
       cell.setPaddingLeft(padLeft);
       cell.setPaddingRight(padRight);
-      cell.setVerticalAlignment(DocumentApp.VerticalAlignment.CENTER);
+      cell.setVerticalAlignment(DocumentApp.VerticalAlignment.TOP);
 
       // Cell Paragraph Content & Typography
       const numChildren = cell.getNumChildren();
@@ -1350,6 +1350,7 @@ function getSidebarHtml() {
             border-width: 1px;
             border-style: solid;
             text-align: center;
+            vertical-align: top;
             font-weight: 700;
             font-size: 12px;
           }
@@ -1358,6 +1359,7 @@ function getSidebarHtml() {
             border-width: 1px;
             border-style: solid;
             text-align: left;
+            vertical-align: top;
             font-size: 10px;
           }
 
@@ -1476,8 +1478,8 @@ function getSidebarHtml() {
              ========================================== -->
         <div id="tabContentTables" class="tab-content active">
           <div class="info-badge">
-            ✓ <strong>Header:</strong> Middle-aligned & Larger Font<br>
-            ✓ <strong>Table Text:</strong> Left-aligned<br>
+            ✓ <strong>Header:</strong> Middle-aligned &amp; Larger Bold Font<br>
+            ✓ <strong>Table Text:</strong> Left-aligned &amp; Top-aligned (Always on Top)<br>
             ✓ <strong>Table:</strong> Centered on Page
           </div>
 
@@ -1923,6 +1925,7 @@ function getSidebarHtml() {
               cell.style.padding = padPx;
               cell.style.borderWidth = (parseFloat(borderWidthPx) || 0) + 'px';
               cell.style.borderStyle = parseFloat(borderWidthPx) > 0 ? 'solid' : 'none';
+              cell.style.verticalAlign = 'top';
             });
 
             // Live preview: inline code token highlight

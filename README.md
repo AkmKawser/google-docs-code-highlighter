@@ -24,7 +24,7 @@
 - **🎯 Intelligent Cell Typography & Alignment**:
   - **Font Families**: Roboto, Arial, Inter, Open Sans, Lato, Montserrat, Calibri, Trebuchet MS, Georgia, Merriweather, Times New Roman, Consolas, or JetBrains Mono.
   - **Header Row**: Middle-aligned (centered) with larger bold typography (8.5–20pt) &mdash; table title row is always bold.
-  - **Table Text (Data Rows)**: Strictly left-aligned (not centered or right-aligned) with clean body typography (8–20pt).
+  - **Table Text (Data Rows)**: Strictly left-aligned with top vertical alignment (always on top, never middle-aligned) and clean body typography (8–20pt).
   - **Table Element**: Centered on page across document margins.
   - Refined cell padding (Compact, Normal, Relaxed) and soft borders.
 - **🛡️ Code Block Safety**: Automatically differentiates between regular data tables and code containers, keeping your syntax highlighting intact while centering both!

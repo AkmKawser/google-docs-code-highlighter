@@ -2323,9 +2323,7 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
 
   // 3. Pre-existing Google Docs formal headings (preserve unless overridden)
   let existingHeading = null;
-  try {
-    existingHeading = p.getHeading();
-  } catch(e) {}
+  try { existingHeading = p.getHeading(); } catch(e) {}
   if (existingHeading && existingHeading !== DocumentApp.ParagraphHeading.NORMAL) {
     if (existingHeading === DocumentApp.ParagraphHeading.TITLE) {
       state.hasTitle = true;
@@ -2358,58 +2356,12 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
   // Common metadata prefixes at top of documents that shouldn't be titles
   const isMetadataLine = /^(?:by|author|date|published|version|rev|changelog|copyright|table of contents|toc|license|page\s+\d+)[:\s]/i.test(text);
 
-  // Check if text looks like a running narrative sentence (ends in period and has multiple sentences or is long)
+  // Check if text looks like a running narrative sentence
   const isNarrativeSentence = /[.;]$/.test(text) && !/^(?:etc|vs|vol|no|dr|mr|mrs|prof)\.$/i.test(text) && (text.split(/\s+/).length > 16 || /[.!?]\s+[A-Z]/.test(text));
 
-  // 5. Document Top Title Heuristic (within first 3 non-empty paragraphs if no title yet)
-  let isEntirelyBold = false;
-  let maxFontSize = 0;
-  let alignment = null;
-  try {
-    const textObj = p.editAsText();
-    if (textObj.getText().length > 0) {
-      isEntirelyBold = textObj.isBold() === true;
-      maxFontSize = Number(textObj.getFontSize(0)) || 0;
-    }
-    alignment = p.getAlignment();
-  } catch(e) {}
+  // --- STRUCTURAL CHECKS (no API calls needed, pure text analysis) ---
 
-  if (!state.hasTitle && state.nonEmptyCount <= 3 && !isMetadataLine && !isNarrativeSentence) {
-    const words = text.split(/\s+/);
-    if (words.length <= 16 && text.length <= 130) {
-      const hasStyleCue = (maxFontSize >= 15) || isEntirelyBold || (alignment === DocumentApp.HorizontalAlignment.CENTER);
-      if (hasStyleCue || isFirstNonEmpty) {
-        state.hasTitle = true;
-        return { role: 'title', headingLevel: 1, cleanText: text };
-      }
-    }
-  }
-
-  // 6. Typographic cues: Large font anywhere before any heading
-  if (maxFontSize >= 18 && text.length <= 120 && !isNarrativeSentence) {
-    if (!state.hasTitle) {
-      state.hasTitle = true;
-      return { role: 'title', headingLevel: 1, cleanText: text };
-    }
-    state.lastHeadingLevel = 1;
-    return { role: 'heading1', headingLevel: 1, cleanText: text };
-  }
-
-  // 7. Bold short headings
-  if (isEntirelyBold && text.length <= 90 && !isNarrativeSentence) {
-    if (!state.hasTitle && state.nonEmptyCount <= 3) {
-      state.hasTitle = true;
-      return { role: 'title', headingLevel: 1, cleanText: text };
-    }
-    if (state.lastHeadingLevel === 1 && text.length < 50) {
-      state.lastHeadingLevel = 2;
-      return { role: 'sub', headingLevel: 2, cleanText: text };
-    }
-    state.lastHeadingLevel = 1;
-    return { role: 'heading1', headingLevel: 1, cleanText: text };
-  }
-
-  // 8. Numbered Sub-sub-sections (H3): e.g. "1.1.1 Overview", "(a) Item", "(1) Item"
+  // 5. Numbered Sub-sub-sections (H3): e.g. "1.1.1 Overview", "(a) Item"
   if (text.length <= 90 && !isNarrativeSentence) {
     if (/^\d+\.\d+\.\d+\.?\s+[A-Za-z]/.test(text) || /^\([a-z0-9]+\)\s+[A-Za-z]/i.test(text)) {
       state.lastHeadingLevel = 3;
@@ -2417,7 +2369,7 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // 9. Numbered Sub-sections (H2): e.g. "1.1 Background", "2.3 Implementation", "a) Setup", "Step 1:"
+  // 6. Numbered Sub-sections (H2): e.g. "1.1 Background", "a) Setup", "Step 1:"
   if (text.length <= 90 && !isNarrativeSentence) {
     if (
       /^\d+\.\d+\.?\s+[A-Za-z]/.test(text) ||
@@ -2429,7 +2381,7 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // 10. Numbered Main Sections (H1): e.g. "1. Introduction", "2. Architecture", "I. Executive Summary", "A. Background"
+  // 7. Numbered Main Sections (H1): e.g. "1. Introduction", "I. Executive Summary"
   if (text.length <= 90 && !isNarrativeSentence) {
     if (
       /^(?:\d+|[A-Z]|[IVXLCDM]+)\.\s+[A-Z]/.test(text) ||
@@ -2440,17 +2392,7 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // 11. Font size 14-17pt
-  if (maxFontSize >= 14 && text.length <= 90 && !isNarrativeSentence) {
-    if (!state.hasTitle && state.nonEmptyCount <= 3) {
-      state.hasTitle = true;
-      return { role: 'title', headingLevel: 1, cleanText: text };
-    }
-    state.lastHeadingLevel = 1;
-    return { role: 'heading1', headingLevel: 1, cleanText: text };
-  }
-
-  // 12. ALL CAPS Standalone Headings (H1): e.g. "EXECUTIVE SUMMARY", "METHODOLOGY", "RESULTS"
+  // 8. ALL CAPS Standalone Headings (H1): e.g. "EXECUTIVE SUMMARY"
   if (text.length >= 3 && text.length <= 60 && !isNarrativeSentence) {
     if (/^[A-Z0-9\s&,/:–—\-]+$/.test(text) && /[A-Z]{2,}/.test(text)) {
       if (!state.hasTitle && state.nonEmptyCount <= 2) {
@@ -2462,7 +2404,7 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // 13. Title Case Short Headers without punctuation (e.g. "Key Architecture Overview")
+  // 9. Title Case Short Headers (e.g. "Key Architecture Overview")
   if (text.length >= 4 && text.length <= 65 && !isNarrativeSentence) {
     const words = text.split(/\s+/);
     if (words.length >= 2 && words.length <= 8) {
@@ -2479,6 +2421,81 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
           state.lastHeadingLevel = (role === 'sub') ? 2 : 1;
           return { role: role, headingLevel: (role === 'sub') ? 2 : 1, cleanText: text };
         }
+      }
+    }
+  }
+
+  // --- TYPOGRAPHY CHECKS (expensive API calls — only for short paragraphs in early document positions) ---
+  // Only call editAsText/isBold/getFontSize/getAlignment when the paragraph could plausibly be a
+  // heading based on its position and length. Skip for long body text to avoid API quota errors.
+  const isPotentialHeading = text.length <= 130 && !isNarrativeSentence && !isMetadataLine;
+  const isEarlyInDocument = state.nonEmptyCount <= 10 || !state.hasTitle;
+
+  if (isPotentialHeading && isEarlyInDocument) {
+    let isEntirelyBold = false;
+    let maxFontSize = 0;
+    let alignment = null;
+    try {
+      const textObj = p.editAsText();
+      if (textObj.getText().length > 0) {
+        isEntirelyBold = textObj.isBold() === true;
+        maxFontSize = Number(textObj.getFontSize(0)) || 0;
+      }
+      alignment = p.getAlignment();
+    } catch(e) {}
+
+    // 10. Document Top Title Heuristic (within first 3 non-empty paragraphs)
+    if (!state.hasTitle && state.nonEmptyCount <= 3 && !isMetadataLine) {
+      const words = text.split(/\s+/);
+      if (words.length <= 16 && text.length <= 130) {
+        const hasStyleCue = (maxFontSize >= 15) || isEntirelyBold || (alignment === DocumentApp.HorizontalAlignment.CENTER);
+        if (hasStyleCue || isFirstNonEmpty) {
+          state.hasTitle = true;
+          return { role: 'title', headingLevel: 1, cleanText: text };
+        }
+      }
+    }
+
+    // 11. Large font (>=18pt) heading detection
+    if (maxFontSize >= 18 && text.length <= 120) {
+      if (!state.hasTitle) {
+        state.hasTitle = true;
+        return { role: 'title', headingLevel: 1, cleanText: text };
+      }
+      state.lastHeadingLevel = 1;
+      return { role: 'heading1', headingLevel: 1, cleanText: text };
+    }
+
+    // 12. Bold short headings
+    if (isEntirelyBold && text.length <= 90) {
+      if (!state.hasTitle && state.nonEmptyCount <= 3) {
+        state.hasTitle = true;
+        return { role: 'title', headingLevel: 1, cleanText: text };
+      }
+      if (state.lastHeadingLevel === 1 && text.length < 50) {
+        state.lastHeadingLevel = 2;
+        return { role: 'sub', headingLevel: 2, cleanText: text };
+      }
+      state.lastHeadingLevel = 1;
+      return { role: 'heading1', headingLevel: 1, cleanText: text };
+    }
+
+    // 13. Medium font (14-17pt) heading detection
+    if (maxFontSize >= 14 && text.length <= 90) {
+      if (!state.hasTitle && state.nonEmptyCount <= 3) {
+        state.hasTitle = true;
+        return { role: 'title', headingLevel: 1, cleanText: text };
+      }
+      state.lastHeadingLevel = 1;
+      return { role: 'heading1', headingLevel: 1, cleanText: text };
+    }
+
+    // 14. First non-empty line fallback (no styling cues needed)
+    if (isFirstNonEmpty && !state.hasTitle) {
+      const words = text.split(/\s+/);
+      if (words.length <= 16 && text.length <= 130) {
+        state.hasTitle = true;
+        return { role: 'title', headingLevel: 1, cleanText: text };
       }
     }
   }

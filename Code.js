@@ -448,6 +448,7 @@ function formatSingleTable(table, options, body) {
             try { textObj.setFontFamily(fontFamily); } catch(e) {}
             if (isHeader) {
               textObj.setBold(true);
+              try { textObj.setBold(0, textObj.getText().length - 1, true); } catch(e) {}
               textObj.setForegroundColor(headerText);
               try { textObj.setFontSize(headerFontSize); } catch(e) {}
             } else {
@@ -790,7 +791,13 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
     line.setLineSpacing(1.15);
     line.setForegroundColor(textColor);
     
-    applySyntaxHighlight(line.editAsText(), options);
+    const textObj = line.editAsText();
+    if (textObj.getText().length > 0) {
+      textObj.setBold(false);
+      try { textObj.setBold(0, textObj.getText().length - 1, false); } catch(e) {}
+    }
+    
+    applySyntaxHighlight(textObj, options);
   });
 
   paragraphGroup.forEach(p => {
@@ -1000,7 +1007,12 @@ function indentSingleCodeBlock(table, indentStyle, options) {
     p.setFontSize(fontSize);
     p.setLineSpacing(1.15);
     p.setForegroundColor(textColor);
-    applySyntaxHighlight(p.editAsText(), options);
+    const textObj = p.editAsText();
+    if (textObj.getText().length > 0) {
+      textObj.setBold(false);
+      try { textObj.setBold(0, textObj.getText().length - 1, false); } catch(e) {}
+    }
+    applySyntaxHighlight(textObj, options);
   }
 }
 
@@ -1121,6 +1133,14 @@ function getIndentLabel(style) {
 
 function applySyntaxHighlight(textObj, options) {
   const text = textObj.getText();
+  if (!text || text.length === 0) return;
+
+  // Code block text must never be bold
+  try {
+    textObj.setBold(false);
+    textObj.setBold(0, text.length - 1, false);
+  } catch(e) {}
+
   const kwColor = options.keywordColor || '#CF222E';
   const strColor = options.stringColor || '#0A3069';
   const comColor = options.commentColor || '#6E7781';
@@ -1346,6 +1366,7 @@ function getSidebarHtml() {
             border-radius: 4px;
             padding: 8px 10px;
             font-size: 10px;
+            font-weight: normal;
             line-height: 1.35;
             overflow-x: auto;
             border-width: 1px;
@@ -1756,9 +1777,9 @@ function getSidebarHtml() {
             </div>
             <div class="preview-body">
               <div id="codePreviewBox" class="preview-code-box">
-                <span id="pKw" style="color: #0550AE; font-weight: bold;">function</span> <span id="pFn">renderChart</span>() {<br>
+                <span id="pKw" style="color: #0550AE; font-weight: normal;">function</span> <span id="pFn">renderChart</span>() {<br>
                 <span id="pIndent">&nbsp;&nbsp;</span><span id="pCom" style="color: #6E7781;">// Align & format</span><br>
-                <span id="pIndent2">&nbsp;&nbsp;</span><span id="pKw2" style="color: #0550AE; font-weight: bold;">return</span> <span id="pStr" style="color: #0A3069;">"Success!"</span>;<br>
+                <span id="pIndent2">&nbsp;&nbsp;</span><span id="pKw2" style="color: #0550AE; font-weight: normal;">return</span> <span id="pStr" style="color: #0A3069;">"Success!"</span>;<br>
                 }
               </div>
             </div>
@@ -1872,10 +1893,11 @@ function getSidebarHtml() {
             // Apply selected font family to table preview
             previewTable.style.fontFamily = tFont + ', -apple-system, sans-serif';
 
-            // Header Row: Middle-aligned & Larger Font
+            // Header Row: Middle-aligned, ALWAYS BOLD & Larger Font
             headerRow.style.backgroundColor = hBg;
             headerRow.style.color = hText;
             headerRow.style.textAlign = 'center';
+            headerRow.style.fontWeight = 'bold';
             headerRow.style.fontSize = (parseFloat(hFontSize) + 1) + 'px';
 
             // Data Rows: strictly LEFT-aligned & standard font size
@@ -2054,6 +2076,7 @@ function getSidebarHtml() {
             box.style.color = text;
             box.style.borderColor = border;
             box.style.fontFamily = font + ', monospace';
+            box.style.fontWeight = 'normal';
             const cFontSize = document.getElementById('codeFontSizeSelect').value;
             box.style.fontSize = parseFloat(cFontSize) + 'px';
 

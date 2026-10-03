@@ -1,3 +1,4 @@
+# ⚡Upcoming Updates : https://gist.github.com/AkmKawser/f72ed9bc1806b1a342c4382fad5e5b29
 # ⚡ Google Docs Code, Table & Typography Suite
 
 > A smart Google Apps Script suite that formats document typography (Title, Heading 1, Sub-headings, Body), highlights code blocks with rich token syntax and professional spacing normalization, styles data tables with professional themes & zebra striping, and lets you **save, export & import your full formatting setup across documents** — featuring an interactive **5-tab sidebar** and zero markdown backticks required.

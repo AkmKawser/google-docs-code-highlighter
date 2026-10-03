@@ -8,6 +8,76 @@
 
 ---
 
+## ⚡ Google Quotas, Rate Limits & Troubleshooting ("Service Documents failed")
+
+When working with heavy automation across large Google Docs, you may encounter Google's internal service limits or the generic error:
+> `Service Documents failed while accessing document with id <YOUR_DOCUMENT_ID>`
+
+Understanding how Google Docs enforces quotas will help you diagnose and bypass these limits.
+
+### 1. 📊 Official Google Apps Script Platform Quotas
+
+Google enforces user-level and account-level quotas reset every 24 hours:
+
+| Quota / Constraint | Personal Accounts (`@gmail.com`) | Google Workspace Accounts |
+|---|---|---|
+| **Max Execution Time** | **6 minutes / execution** | **6 minutes / execution** |
+| **API Request Rate** | ~100 requests / 100 seconds / user | ~100 requests / 100 seconds / user |
+| **Daily Trigger Runtime** | 90 minutes / day | 6 hours / day |
+| **Document Size Limit** | 1.02 million characters | 1.02 million characters |
+| **Max Simultaneous Executions** | 30 concurrent scripts | 30 concurrent scripts |
+
+---
+
+### 2. 🛡️ Hidden Per-Document Engine Limits
+
+Even if your daily account quota is healthy, Google Docs enforces internal real-time engine constraints on **individual documents**:
+
+1. **Real-Time Collaboration & Burst Rate Limits**:
+   - Google Docs runs on a real-time collaborative Operational Transformation (OT) engine designed for human keystrokes.
+   - When an Apps Script suite performs hundreds of structural DOM mutations in a few seconds (e.g. converting 10+ code groups into tables, styling multi-row tables, and re-styling dozens of paragraphs), it floods the synchronization buffer for that specific document.
+   - When Google's server-side document engine is temporarily throttled or unable to reconcile changes fast enough, it rejects the batch transaction with `Service Documents failed while accessing document with id...`.
+
+2. **Dirty Revision Journal & History Bloat**:
+   - Every mutation and script run is recorded in the document's internal revision tree.
+   - If a script crashes or encounters an issue mid-mutation, Google's server retains uncommitted or fragmented revision journal states for that specific file ID. Subsequent heavy batch writes must reconcile against all prior changes, frequently timing out or failing on that specific document.
+
+3. **Inline Element Slicing Conflicts**:
+   - Paragraphs containing embedded drawings, equations, horizontal rules, or bookmarks cannot accept arbitrary character range styling (e.g., `(0, textLen - 1)`). Attempting to style across these boundaries causes Google Docs' server validator to abort the transaction.
+
+---
+
+### 3. 🔍 Why Does It Work on One Document but Fail on Another?
+
+* **Clean Documents**: A newly created document or fresh copy has an empty revision journal and full burst quota headroom. The suite executes seamlessly from start to finish.
+* **Problem Documents**: Documents that have undergone dozens of rapid script executions, extensive edits, or crashed runs have accumulated a heavy revision backlog on Google's backend, making them vulnerable to transient service errors.
+
+---
+
+### 4. 🚀 Proven Solutions & Workarounds
+
+If you ever encounter `Service Documents failed`:
+
+#### Option A: Clean Copy (30-Second Permanent Reset)
+1. In Google Docs, click **File** > **Make a copy**.
+2. Open the newly created copy.
+3. Run **`🚀 Smart Auto-Format Entire Document`**.
+> **Why it works**: Making a copy generates a brand-new file ID with a 100% clean revision journal and full burst quota, while preserving all of your text and tables.
+
+#### Option B: Run Phases Individually (Prevents Burst Throttling)
+Instead of running the combined 1-click formatter, execute each module with a 3-second gap:
+1. Click **`⚡ Highlight All Code (Quick Run)`** — wait 3 seconds.
+2. Click **`📊 Format & Center All Tables`** — wait 3 seconds.
+3. Click **`✍️ Format All Document Typography`**.
+> **Why it works**: Breaking the process into 3 discrete transactions keeps your write volume well within Google's real-time rate limit.
+
+#### Option C: Built-in Diagnostic Tool
+Use **`⚡ Code, Table & Typography Suite`** > **`🔍 Diagnose Smart Format (Debug)`**:
+- Runs isolated health checks for Document Access, Paragraphs, Tables, Bookmarks, and runs live tests of each formatting module (Code, Tables, Typography).
+- Reports exact pass/fail status for every step so you can identify if a specific table or paragraph is causing an issue.
+
+---
+
 ## ✨ Features
 
 ### ⚡ Smart Code Highlighter & Professional Spacing Normalizer
@@ -186,75 +256,7 @@ clasp push
 
 ---
 
-## ⚡ Google Quotas, Rate Limits & Troubleshooting ("Service Documents failed")
 
-When working with heavy automation across large Google Docs, you may encounter Google's internal service limits or the generic error:
-> `Service Documents failed while accessing document with id <YOUR_DOCUMENT_ID>`
-
-Understanding how Google Docs enforces quotas will help you diagnose and bypass these limits.
-
-### 1. 📊 Official Google Apps Script Platform Quotas
-
-Google enforces user-level and account-level quotas reset every 24 hours:
-
-| Quota / Constraint | Personal Accounts (`@gmail.com`) | Google Workspace Accounts |
-|---|---|---|
-| **Max Execution Time** | **6 minutes / execution** | **6 minutes / execution** |
-| **API Request Rate** | ~100 requests / 100 seconds / user | ~100 requests / 100 seconds / user |
-| **Daily Trigger Runtime** | 90 minutes / day | 6 hours / day |
-| **Document Size Limit** | 1.02 million characters | 1.02 million characters |
-| **Max Simultaneous Executions** | 30 concurrent scripts | 30 concurrent scripts |
-
----
-
-### 2. 🛡️ Hidden Per-Document Engine Limits
-
-Even if your daily account quota is healthy, Google Docs enforces internal real-time engine constraints on **individual documents**:
-
-1. **Real-Time Collaboration & Burst Rate Limits**:
-   - Google Docs runs on a real-time collaborative Operational Transformation (OT) engine designed for human keystrokes.
-   - When an Apps Script suite performs hundreds of structural DOM mutations in a few seconds (e.g. converting 10+ code groups into tables, styling multi-row tables, and re-styling dozens of paragraphs), it floods the synchronization buffer for that specific document.
-   - When Google's server-side document engine is temporarily throttled or unable to reconcile changes fast enough, it rejects the batch transaction with `Service Documents failed while accessing document with id...`.
-
-2. **Dirty Revision Journal & History Bloat**:
-   - Every mutation and script run is recorded in the document's internal revision tree.
-   - If a script crashes or encounters an issue mid-mutation, Google's server retains uncommitted or fragmented revision journal states for that specific file ID. Subsequent heavy batch writes must reconcile against all prior changes, frequently timing out or failing on that specific document.
-
-3. **Inline Element Slicing Conflicts**:
-   - Paragraphs containing embedded drawings, equations, horizontal rules, or bookmarks cannot accept arbitrary character range styling (e.g., `(0, textLen - 1)`). Attempting to style across these boundaries causes Google Docs' server validator to abort the transaction.
-
----
-
-### 3. 🔍 Why Does It Work on One Document but Fail on Another?
-
-* **Clean Documents**: A newly created document or fresh copy has an empty revision journal and full burst quota headroom. The suite executes seamlessly from start to finish.
-* **Problem Documents**: Documents that have undergone dozens of rapid script executions, extensive edits, or crashed runs have accumulated a heavy revision backlog on Google's backend, making them vulnerable to transient service errors.
-
----
-
-### 4. 🚀 Proven Solutions & Workarounds
-
-If you ever encounter `Service Documents failed`:
-
-#### Option A: Clean Copy (30-Second Permanent Reset)
-1. In Google Docs, click **File** > **Make a copy**.
-2. Open the newly created copy.
-3. Run **`🚀 Smart Auto-Format Entire Document`**.
-> **Why it works**: Making a copy generates a brand-new file ID with a 100% clean revision journal and full burst quota, while preserving all of your text and tables.
-
-#### Option B: Run Phases Individually (Prevents Burst Throttling)
-Instead of running the combined 1-click formatter, execute each module with a 3-second gap:
-1. Click **`⚡ Highlight All Code (Quick Run)`** — wait 3 seconds.
-2. Click **`📊 Format & Center All Tables`** — wait 3 seconds.
-3. Click **`✍️ Format All Document Typography`**.
-> **Why it works**: Breaking the process into 3 discrete transactions keeps your write volume well within Google's real-time rate limit.
-
-#### Option C: Built-in Diagnostic Tool
-Use **`⚡ Code, Table & Typography Suite`** > **`🔍 Diagnose Smart Format (Debug)`**:
-- Runs isolated health checks for Document Access, Paragraphs, Tables, Bookmarks, and runs live tests of each formatting module (Code, Tables, Typography).
-- Reports exact pass/fail status for every step so you can identify if a specific table or paragraph is causing an issue.
-
----
 
 ## 🛠️ Project Structure
 

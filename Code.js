@@ -8,7 +8,7 @@
 function onOpen() {
   DocumentApp.getUi()
     .createMenu('⚡ Code, Table & Typography Suite')
-    .addItem('🚀 Smart Auto-Format Entire Document', 'quickSmartAutoFormatDocument')
+    .addItem('🚀 Smart Format (Phased — Code → Tables → Typography)', 'quickSmartAutoFormatDocument')
     .addSeparator()
     .addItem('🔍 Diagnose Smart Format (Debug)', 'quickDiagnoseSmartFormat')
     .addSeparator()
@@ -1959,43 +1959,82 @@ function quickUndoDocumentTypography() {
  * 2. Data tables -> centered on page and formatted with professional theme & zebra striping
  * 3. Typography -> Title, Heading 1, Sub-headings (H2, H3), and Body text with inline code highlights
  */
+/**
+ * Menu entry point for the phased Smart Auto-Format.
+ * Runs Code → Tables → Typography as 3 separate transactions
+ * with a short pause between each to stay within Google's burst rate limit.
+ */
 function quickSmartAutoFormatDocument() {
+  const ui = DocumentApp.getUi();
+  const codeOptions  = getUserPreferences();
+  const tableOptions = getTablePreferences();
+  const typoOptions  = getTypographyPreferences();
+  const summary = [];
+
+  // Phase 1: Bookmarks + Code
   try {
-    const result = smartAutoFormatEntireDocument();
-    DocumentApp.getUi().alert('🚀 Smart Auto-Formatter', result.message, DocumentApp.getUi().ButtonSet.OK);
-  } catch (err) {
-    Logger.log('quickSmartAutoFormatDocument error: ' + err);
-    DocumentApp.getUi().alert('⚠️ Smart Auto-Formatter', 'An error occurred during formatting: ' + (err.message || err.toString()), DocumentApp.getUi().ButtonSet.OK);
+    removeAllBookmarks();
+  } catch(e) {}
+  try {
+    const r = highlightAllCodeBlocks(codeOptions);
+    if (r && r.count > 0) summary.push('⚡ ' + r.count + ' code block(s) formatted');
+    else summary.push('⚡ Code: ' + (r ? r.message : 'done'));
+  } catch(e) {
+    summary.push('⚡ Code: error — ' + (e.message || e));
   }
+
+  // Pause between phases
+  Utilities.sleep(1500);
+
+  // Phase 2: Tables
+  try {
+    const r = formatAllDocumentTables(tableOptions);
+    if (r && r.count > 0) summary.push('📊 ' + r.count + ' table(s) aligned & styled');
+    else summary.push('📊 Tables: ' + (r ? r.message : 'done'));
+  } catch(e) {
+    summary.push('📊 Tables: error — ' + (e.message || e));
+  }
+
+  // Pause between phases
+  Utilities.sleep(1500);
+
+  // Phase 3: Typography
+  try {
+    const r = formatDocumentTypography(typoOptions);
+    summary.push('✍️ ' + (r ? r.message : 'Typography formatted'));
+  } catch(e) {
+    summary.push('✍️ Typography: error — ' + (e.message || e));
+  }
+
+  ui.alert(
+    '🚀 Phased Auto-Format Complete',
+    summary.join('\n'),
+    ui.ButtonSet.OK
+  );
 }
 
-function smartAutoFormatEntireDocument(codeOptions, tableOptions, typoOptions) {
-  codeOptions = codeOptions || getUserPreferences();
-  tableOptions = tableOptions || getTablePreferences();
-  typoOptions = typoOptions || getTypographyPreferences();
-
-  _codeBlockTableCache = new Map();
-
-  try { removeAllBookmarks(); } catch(e) {}
-
-  const codeResult = highlightAllCodeBlocks(codeOptions);
-  const tableResult = formatAllDocumentTables(tableOptions);
-  const typoResult = formatDocumentTypography(typoOptions);
-
-  const summary = [];
-  if (codeResult && codeResult.count > 0) summary.push(codeResult.count + ' code block(s) formatted');
-  if (tableResult && tableResult.count > 0) summary.push(tableResult.count + ' table(s) aligned & styled');
-  if (typoResult && typoResult.count > 0) summary.push(typoResult.message || 'Typography formatted');
-
-  return {
-    success: true,
-    codeResult: codeResult,
-    tableResult: tableResult,
-    typoResult: typoResult,
-    message: summary.length > 0
-      ? '🚀 Smart Auto-Format Complete!\n\n• ' + summary.join('\n• ')
-      : 'Document scanned. All elements are formatted!'
-  };
+/**
+ * Backend function called phase-by-phase from the sidebar.
+ * @param {string} phase  One of: 'bookmarks+code', 'tables', 'typography'
+ * @param {object} codeOptions
+ * @param {object} tableOptions
+ * @param {object} typoOptions
+ */
+function smartAutoFormatPhase(phase, codeOptions, tableOptions, typoOptions) {
+  if (phase === 'bookmarks+code') {
+    try { removeAllBookmarks(); } catch(e) {}
+    const r = highlightAllCodeBlocks(codeOptions || getUserPreferences());
+    return { success: true, phase: phase, message: r ? r.message : 'Code done', count: r ? r.count : 0 };
+  }
+  if (phase === 'tables') {
+    const r = formatAllDocumentTables(tableOptions || getTablePreferences());
+    return { success: true, phase: phase, message: r ? r.message : 'Tables done', count: r ? r.count : 0 };
+  }
+  if (phase === 'typography') {
+    const r = formatDocumentTypography(typoOptions || getTypographyPreferences());
+    return { success: true, phase: phase, message: r ? r.message : 'Typography done', count: r ? r.count : 0 };
+  }
+  return { success: false, phase: phase, message: 'Unknown phase: ' + phase };
 }
 
 /**
@@ -3911,18 +3950,28 @@ function getSidebarHtml() {
       </head>
       <body>
 
-        <!-- Master 1-Click Smart Auto-Formatter Card -->
-        <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; color: #ffffff; text-align: center; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">
+        <!-- Phased Smart Auto-Formatter Card -->
+        <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; color: #ffffff; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">
           <div style="font-weight: 700; font-size: 13px; margin-bottom: 2px; display:flex; align-items:center; justify-content:center; gap:6px;">
             <span>🚀</span> Smart Auto-Format
           </div>
-          <div style="font-size: 11px; opacity: 0.9; margin-bottom: 8px;">
-            Auto-detects Title, Headings, Code &amp; Tables
+          <div style="font-size: 11px; opacity: 0.9; margin-bottom: 8px; text-align:center;">
+            Runs in 3 safe phases — no quota crashes
+          </div>
+          <!-- Phase progress indicators -->
+          <div id="phaseIndicators" style="display:none; margin-bottom:8px;">
+            <div style="display:flex; gap:4px; justify-content:center; margin-bottom:6px;">
+              <div id="phaseTag1" style="flex:1; text-align:center; padding:3px 4px; border-radius:4px; font-size:10px; font-weight:700; background:rgba(255,255,255,0.15); color:#fff;">⚡ Code</div>
+              <div style="color:rgba(255,255,255,0.5); font-size:11px; line-height:22px;">→</div>
+              <div id="phaseTag2" style="flex:1; text-align:center; padding:3px 4px; border-radius:4px; font-size:10px; font-weight:700; background:rgba(255,255,255,0.15); color:#fff;">📊 Tables</div>
+              <div style="color:rgba(255,255,255,0.5); font-size:11px; line-height:22px;">→</div>
+              <div id="phaseTag3" style="flex:1; text-align:center; padding:3px 4px; border-radius:4px; font-size:10px; font-weight:700; background:rgba(255,255,255,0.15); color:#fff;">✍️ Typo</div>
+            </div>
           </div>
           <button id="btnSmartAutoFormat" onclick="runSmartAutoFormat()" style="width: 100%; border: none; background: #ffffff; color: #1e3a8a; font-weight: 700; font-size: 12px; padding: 7px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s ease;">
             ⚡ Auto-Format Entire Document
           </button>
-          <div id="smartAutoStatus" class="status-box" style="display:none; margin-top: 8px; text-align: left; background:#ffffff; color:#1e293b;"></div>
+          <div id="smartAutoStatus" style="display:none; margin-top: 8px; font-size:11px; background:#ffffff; color:#1e293b; padding:7px 9px; border-radius:5px; line-height:1.5;"></div>
         </div>
 
         <!-- Remove Bookmarks utility row -->
@@ -5223,32 +5272,94 @@ function getSidebarHtml() {
             el.innerText = msg;
           }
 
+          // -------------------------------------------------------
+          // Phased Smart Auto-Format
+          // Runs 3 separate server calls (Code → Tables → Typography)
+          // with a 1.5 s gap between each to avoid burst rate-limit.
+          // -------------------------------------------------------
           function runSmartAutoFormat() {
             const statusEl = document.getElementById('smartAutoStatus');
-            if (statusEl) {
-              statusEl.style.display = 'block';
-              statusEl.className = 'status-box loading';
-              statusEl.innerText = 'Scanning & auto-formatting entire document...';
-            }
+            const indicators = document.getElementById('phaseIndicators');
             const btn = document.getElementById('btnSmartAutoFormat');
-            if (btn) btn.disabled = true;
+            const p1 = document.getElementById('phaseTag1');
+            const p2 = document.getElementById('phaseTag2');
+            const p3 = document.getElementById('phaseTag3');
 
+            const codeOpts  = getCodeOptions();
+            const tableOpts = getTableOptions();
+            const typoOpts  = getTypographyOptions();
+
+            if (btn) btn.disabled = true;
+            if (indicators) indicators.style.display = 'block';
+            if (statusEl) { statusEl.style.display = 'block'; statusEl.innerText = ''; }
+
+            function setPhase(tag, state, msg) {
+              // state: 'active' | 'done' | 'error' | 'idle'
+              const colors = { active: '#facc15', done: '#4ade80', error: '#f87171', idle: 'rgba(255,255,255,0.15)' };
+              const textColors = { active: '#1e293b', done: '#052e16', error: '#450a0a', idle: '#fff' };
+              if (!tag) return;
+              tag.style.background = colors[state] || colors.idle;
+              tag.style.color = textColors[state] || '#fff';
+              if (msg) tag.title = msg;
+            }
+
+            function appendStatus(line) {
+              if (statusEl) statusEl.innerText += (statusEl.innerText ? '\n' : '') + line;
+            }
+
+            // Reset phase indicators
+            setPhase(p1, 'idle'); setPhase(p2, 'idle'); setPhase(p3, 'idle');
+
+            // --- Phase 1: Bookmarks + Code ---
+            setPhase(p1, 'active');
+            appendStatus('⏳ Phase 1/3: Formatting code blocks…');
             google.script.run
-              .withSuccessHandler(res => {
-                if (btn) btn.disabled = false;
-                if (statusEl) {
-                  statusEl.className = 'status-box ' + (res.success ? 'success' : 'error');
-                  statusEl.innerText = res.message;
-                }
+              .withSuccessHandler(function(r1) {
+                setPhase(p1, r1.success ? 'done' : 'error', r1.message);
+                appendStatus('✅ Phase 1: ' + r1.message);
+
+                // --- Phase 2: Tables (after 1.5 s) ---
+                setPhase(p2, 'active');
+                appendStatus('⏳ Phase 2/3: Formatting tables…');
+                setTimeout(function() {
+                  google.script.run
+                    .withSuccessHandler(function(r2) {
+                      setPhase(p2, r2.success ? 'done' : 'error', r2.message);
+                      appendStatus('✅ Phase 2: ' + r2.message);
+
+                      // --- Phase 3: Typography (after another 1.5 s) ---
+                      setPhase(p3, 'active');
+                      appendStatus('⏳ Phase 3/3: Formatting typography…');
+                      setTimeout(function() {
+                        google.script.run
+                          .withSuccessHandler(function(r3) {
+                            setPhase(p3, r3.success ? 'done' : 'error', r3.message);
+                            appendStatus('✅ Phase 3: ' + r3.message);
+                            appendStatus('\n🚀 All phases complete!');
+                            if (btn) btn.disabled = false;
+                          })
+                          .withFailureHandler(function(err) {
+                            setPhase(p3, 'error');
+                            appendStatus('❌ Phase 3 error: ' + err);
+                            if (btn) btn.disabled = false;
+                          })
+                          .smartAutoFormatPhase('typography', codeOpts, tableOpts, typoOpts);
+                      }, 1500);
+                    })
+                    .withFailureHandler(function(err) {
+                      setPhase(p2, 'error');
+                      appendStatus('❌ Phase 2 error: ' + err);
+                      if (btn) btn.disabled = false;
+                    })
+                    .smartAutoFormatPhase('tables', codeOpts, tableOpts, typoOpts);
+                }, 1500);
               })
-              .withFailureHandler(err => {
+              .withFailureHandler(function(err) {
+                setPhase(p1, 'error');
+                appendStatus('❌ Phase 1 error: ' + err);
                 if (btn) btn.disabled = false;
-                if (statusEl) {
-                  statusEl.className = 'status-box error';
-                  statusEl.innerText = 'Error: ' + err;
-                }
               })
-              .smartAutoFormatEntireDocument(getCodeOptions(), getTableOptions(), getTypographyOptions());
+              .smartAutoFormatPhase('bookmarks+code', codeOpts, tableOpts, typoOpts);
           }
 
           function runRemoveBookmarks() {

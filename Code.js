@@ -449,7 +449,7 @@ function isMonospaceFont(font) {
 
 function isCodeBlockTable(table) {
   if (!table || table.getType() !== DocumentApp.ElementType.TABLE) return false;
-  // Fast structural check first (no API)
+  // Fast structural check: code blocks in this add-on are strictly 1x1 table containers
   if (table.getNumRows() !== 1) return false;
   const row = table.getRow(0);
   if (row.getNumCells() !== 1) return false;
@@ -462,56 +462,27 @@ function isCodeBlockTable(table) {
   let result = false;
   try {
     const cell = row.getCell(0);
-    const bg = (cell.getBackgroundColor() || '').toLowerCase();
-    // Known theme and code backgrounds
-    const knownBgs = [
-      '#f6f8fa', '#21252b', '#282a36', '#272822', '#fdf6e3',
-      '#1e1e1e', '#282c34', '#0d1117', '#fafafa', '#f8f8f2',
-      '#1a1b26', '#2e3440', '#002b36', '#263238', '#282828'
-    ];
-    if (bg && knownBgs.includes(bg)) {
-      result = true;
-    } else {
-      // Check font family of paragraphs (both paragraph level and text element level)
-      const numChildren = cell.getNumChildren();
-      for (let i = 0; i < numChildren && !result; i++) {
-        const child = cell.getChild(i);
-        if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
-          const para = child.asParagraph();
-          let font = para.getFontFamily();
-          if (font && isMonospaceFont(font)) {
-            result = true;
-            break;
-          }
-          const text = para.editAsText();
-          if (text.getText().length > 0) {
-            font = text.getFontFamily(0);
-            if (font && isMonospaceFont(font)) {
-              result = true;
-              break;
-            }
-          }
-        }
-      }
+    const numChildren = cell.getNumChildren();
+    if (numChildren === 0) return false;
 
-      // Fallback: check code patterns in lines if still not confirmed
-      if (!result && numChildren > 0) {
-        let codeLines = 0;
-        let inspected = 0;
-        for (let i = 0; i < Math.min(numChildren, 6); i++) {
-          const child = cell.getChild(i);
-          if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
-            inspected++;
-            const t = child.asParagraph().getText().trim();
-            if (isCodeLine(t) || /[{};=()\[\]]/.test(t) || /^\s{2,}|\t/.test(t)) {
-              codeLines++;
-            }
-          }
-        }
-        if (inspected > 0 && codeLines >= Math.ceil(inspected * 0.5)) {
-          result = true;
+    // A 1x1 table containing a HEADING (Title, H1, H2, H3) is a heading banner, NOT a code block
+    let isHeading = false;
+    for (let i = 0; i < numChildren; i++) {
+      const child = cell.getChild(i);
+      if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+        const heading = child.asParagraph().getHeading();
+        if (heading && heading !== DocumentApp.ParagraphHeading.NORMAL) {
+          isHeading = true;
+          break;
         }
       }
+    }
+
+    if (!isHeading) {
+      // Any 1x1 table with standard (NORMAL) paragraphs is a code block container!
+      // This guarantees that any code block (regardless of custom theme, background color,
+      // font, or single/multiple lines) can always be overwritten and reformatted with edited updates.
+      result = true;
     }
   } catch(e) {}
 
@@ -523,40 +494,23 @@ function isCodeBlockTable(table) {
  * Detects whether a table is a 1x1 heading banner container
  */
 function isHeadingBannerTable(table) {
+  if (!table || table.getType() !== DocumentApp.ElementType.TABLE) return false;
   if (table.getNumRows() !== 1) return false;
   const row = table.getRow(0);
   if (row.getNumCells() !== 1) return false;
-  if (isCodeBlockTable(table)) return false;
 
   const cell = row.getCell(0);
   const numChildren = cell.getNumChildren();
 
-  // First check: does the cell have a recognized heading paragraph?
-  let hasHeadingPara = false;
-  let hasNonEmptyText = false;
+  // Heading banner tables specifically contain a heading paragraph (Title, H1, H2, H3)
   for (let i = 0; i < numChildren; i++) {
     const child = cell.getChild(i);
     if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
-      const para = child.asParagraph();
-      const heading = para.getHeading();
+      const heading = child.asParagraph().getHeading();
       if (heading && heading !== DocumentApp.ParagraphHeading.NORMAL) {
-        hasHeadingPara = true;
-        break;
-      }
-      if (para.getText().trim().length > 0) hasNonEmptyText = true;
-    }
-  }
-  if (hasHeadingPara) return true;
-
-  // Second check: 1x1 table with 1-2 non-empty paragraphs and a non-white background
-  // Only do the background color API call if basic heuristics pass (avoids excess API calls)
-  if (hasNonEmptyText && numChildren <= 3) {
-    try {
-      const bgColor = cell.getBackgroundColor();
-      if (bgColor && bgColor !== '#ffffff' && bgColor.toLowerCase() !== '#ffffff' && bgColor !== null) {
         return true;
       }
-    } catch(e) {}
+    }
   }
 
   return false;
@@ -1193,8 +1147,8 @@ function highlightAllCodeBlocks(options, preloadedBody) {
     success: true,
     count: codeGroups.length,
     message: (reformatCount > 0 || codeGroups.length > 0)
-      ? (codeGroups.length > 0 ? 'Formatted ' + codeGroups.length + ' new code block(s)' : 'No new code blocks found') +
-        (reformatCount > 0 ? ' — re-applied theme to ' + reformatCount + ' existing block(s).' : '.')
+      ? (codeGroups.length > 0 ? 'Formatted ' + codeGroups.length + ' new code block(s)' : 'Updated ' + reformatCount + ' code block(s) with new styling') +
+        (codeGroups.length > 0 && reformatCount > 0 ? ' — re-applied theme to ' + reformatCount + ' existing block(s).' : '.')
       : 'No code blocks found in this document.'
   };
 }
@@ -1963,7 +1917,7 @@ function applySyntaxHighlight(textObj, options) {
   }
 
   // 2. Keywords & Declarations (case-insensitive for SQL and all languages)
-  apply(/\b(def|class|function|const|let|var|val|fn|sub|procedure|constructor|method|interface|struct|enum|record|type|alias|namespace|package|import|export|from|as|using|public|private|protected|static|final|abstract|override|readonly|mut|volatile|return|if|else|elif|for|while|do|switch|case|default|break|continue|throw|try|catch|finally|yield|await|async|new|delete|typeof|instanceof|lambda|pass|with|in|is|not|and|or|select|from|where|insert|update|delete|join|inner|left|right|on|group|by|order|having|limit|create|table|alter|drop|set|values|into)\b/gi, kwColor, false);
+  apply(/\b(def|class|function|const|let|var|val|fn|sub|procedure|constructor|method|interface|struct|enum|record|type|alias|namespace|package|import|export|from|as|using|public|private|protected|static|final|abstract|override|readonly|mut|volatile|return|if|else|elif|for|while|do|switch|case|default|break|continue|throw|try|catch|finally|except|raise|assert|yield|await|async|new|delete|typeof|instanceof|lambda|pass|with|in|is|not|and|or|select|from|where|insert|update|delete|join|inner|left|right|on|group|by|order|having|limit|create|table|alter|drop|set|values|into|print|echo)\b/gi, kwColor, false);
 
   // 3. Special Keywords (this, self, super)
   apply(/\b(this|self|super)\b/gi, specColor, false);
@@ -2138,18 +2092,21 @@ function quickSmartAutoFormatDocument() {
  * Reads its own saved preferences — no need to pass options over the RPC wire.
  * @param {string} phase  One of: 'bookmarks+code', 'tables', 'typography'
  */
-function smartAutoFormatPhase(phase) {
+function smartAutoFormatPhase(phase, customOptions) {
   if (phase === 'bookmarks+code') {
     try { removeAllBookmarks(); } catch(e) {}
-    const r = highlightAllCodeBlocks(getUserPreferences());
+    const opts = customOptions || getUserPreferences();
+    const r = highlightAllCodeBlocks(opts);
     return { success: true, phase: phase, message: r ? r.message : 'Code done', count: r ? r.count : 0 };
   }
   if (phase === 'tables') {
-    const r = formatAllDocumentTables(getTablePreferences());
+    const opts = customOptions || getTablePreferences();
+    const r = formatAllDocumentTables(opts);
     return { success: true, phase: phase, message: r ? r.message : 'Tables done', count: r ? r.count : 0 };
   }
   if (phase === 'typography') {
-    const r = formatDocumentTypography(getTypographyPreferences());
+    const opts = customOptions || getTypographyPreferences();
+    const r = formatDocumentTypography(opts);
     return { success: true, phase: phase, message: r ? r.message : 'Typography done', count: r ? r.count : 0 };
   }
   return { success: false, phase: phase, message: 'Unknown phase: ' + phase };
@@ -4767,61 +4724,61 @@ function getSidebarHtml() {
           <div class="control-group">
             <label>Theme Preset</label>
             <select id="codeThemeSelect" onchange="onCodeThemeChange()">
-              <option value="github-light">GitHub Light</option>
-              <option value="one-dark">One Dark Pro (VS Code)</option>
-              <option value="dracula">Dracula Dark</option>
-              <option value="monokai">Monokai Dark</option>
-              <option value="solarized-light">Solarized Light</option>
-              <option value="custom">Custom Colors...</option>
+              <option value="github-light" ${codePrefs.theme === 'github-light' ? 'selected' : ''}>GitHub Light</option>
+              <option value="one-dark" ${codePrefs.theme === 'one-dark' ? 'selected' : ''}>One Dark Pro (VS Code)</option>
+              <option value="dracula" ${codePrefs.theme === 'dracula' ? 'selected' : ''}>Dracula Dark</option>
+              <option value="monokai" ${codePrefs.theme === 'monokai' ? 'selected' : ''}>Monokai Dark</option>
+              <option value="solarized-light" ${codePrefs.theme === 'solarized-light' ? 'selected' : ''}>Solarized Light</option>
+              <option value="custom" ${codePrefs.theme === 'custom' || (!codePrefs.theme && (codePrefs.keywordColor || codePrefs.stringColor)) ? 'selected' : ''}>Custom Colors...</option>
             </select>
           </div>
 
           <div class="control-group">
             <label>Font Size</label>
             <select id="codeFontSizeSelect" onchange="updateCodePreview(); saveCurrentCodeOptions();">
-              <option value="8">8 pt</option>
-              <option value="8.5">8.5 pt (Compact)</option>
-              <option value="9">9 pt</option>
-              <option value="9.5" selected>9.5 pt (Default)</option>
-              <option value="10">10 pt</option>
-              <option value="10.5">10.5 pt</option>
-              <option value="11">11 pt</option>
-              <option value="11.5">11.5 pt</option>
-              <option value="12">12 pt (Large)</option>
-              <option value="13">13 pt</option>
-              <option value="14">14 pt</option>
-              <option value="15">15 pt</option>
-              <option value="16">16 pt</option>
-              <option value="17">17 pt</option>
-              <option value="18">18 pt</option>
-              <option value="19">19 pt</option>
-              <option value="20">20 pt (Extra Large)</option>
+              <option value="8" ${codePrefs.fontSize === '8' ? 'selected' : ''}>8 pt</option>
+              <option value="8.5" ${codePrefs.fontSize === '8.5' ? 'selected' : ''}>8.5 pt (Compact)</option>
+              <option value="9" ${codePrefs.fontSize === '9' ? 'selected' : ''}>9 pt</option>
+              <option value="9.5" ${codePrefs.fontSize === '9.5' || !codePrefs.fontSize ? 'selected' : ''}>9.5 pt (Default)</option>
+              <option value="10" ${codePrefs.fontSize === '10' ? 'selected' : ''}>10 pt</option>
+              <option value="10.5" ${codePrefs.fontSize === '10.5' ? 'selected' : ''}>10.5 pt</option>
+              <option value="11" ${codePrefs.fontSize === '11' ? 'selected' : ''}>11 pt</option>
+              <option value="11.5" ${codePrefs.fontSize === '11.5' ? 'selected' : ''}>11.5 pt</option>
+              <option value="12" ${codePrefs.fontSize === '12' ? 'selected' : ''}>12 pt (Large)</option>
+              <option value="13" ${codePrefs.fontSize === '13' ? 'selected' : ''}>13 pt</option>
+              <option value="14" ${codePrefs.fontSize === '14' ? 'selected' : ''}>14 pt</option>
+              <option value="15" ${codePrefs.fontSize === '15' ? 'selected' : ''}>15 pt</option>
+              <option value="16" ${codePrefs.fontSize === '16' ? 'selected' : ''}>16 pt</option>
+              <option value="17" ${codePrefs.fontSize === '17' ? 'selected' : ''}>17 pt</option>
+              <option value="18" ${codePrefs.fontSize === '18' ? 'selected' : ''}>18 pt</option>
+              <option value="19" ${codePrefs.fontSize === '19' ? 'selected' : ''}>19 pt</option>
+              <option value="20" ${codePrefs.fontSize === '20' ? 'selected' : ''}>20 pt (Extra Large)</option>
             </select>
           </div>
 
           <div class="control-group">
             <label>Font Family</label>
             <select id="codeFontFamilySelect" onchange="updateCodePreview(); saveCurrentCodeOptions();">
-              <option value="Consolas" selected>Consolas (Windows Default)</option>
-              <option value="JetBrains Mono">JetBrains Mono (Developer Favorite)</option>
-              <option value="Roboto Mono">Roboto Mono (Modern)</option>
-              <option value="Courier New">Courier New (Classic)</option>
-              <option value="Inconsolata">Inconsolata (Clean)</option>
-              <option value="Source Code Pro">Source Code Pro (Adobe)</option>
-              <option value="Space Mono">Space Mono (Geometric)</option>
-              <option value="PT Mono">PT Mono</option>
-              <option value="Ubuntu Mono">Ubuntu Mono</option>
+              <option value="Consolas" ${codePrefs.fontFamily === 'Consolas' || !codePrefs.fontFamily ? 'selected' : ''}>Consolas (Windows Default)</option>
+              <option value="JetBrains Mono" ${codePrefs.fontFamily === 'JetBrains Mono' ? 'selected' : ''}>JetBrains Mono (Developer Favorite)</option>
+              <option value="Roboto Mono" ${codePrefs.fontFamily === 'Roboto Mono' ? 'selected' : ''}>Roboto Mono (Modern)</option>
+              <option value="Courier New" ${codePrefs.fontFamily === 'Courier New' ? 'selected' : ''}>Courier New (Classic)</option>
+              <option value="Inconsolata" ${codePrefs.fontFamily === 'Inconsolata' ? 'selected' : ''}>Inconsolata (Clean)</option>
+              <option value="Source Code Pro" ${codePrefs.fontFamily === 'Source Code Pro' ? 'selected' : ''}>Source Code Pro (Adobe)</option>
+              <option value="Space Mono" ${codePrefs.fontFamily === 'Space Mono' ? 'selected' : ''}>Space Mono (Geometric)</option>
+              <option value="PT Mono" ${codePrefs.fontFamily === 'PT Mono' ? 'selected' : ''}>PT Mono</option>
+              <option value="Ubuntu Mono" ${codePrefs.fontFamily === 'Ubuntu Mono' ? 'selected' : ''}>Ubuntu Mono</option>
             </select>
           </div>
 
           <div class="control-group">
             <label>Code Indentation</label>
             <select id="codeIndentSelect" onchange="updateCodePreview(); saveCurrentCodeOptions();">
-              <option value="auto-2">Smart Auto-Indent (2 Spaces)</option>
-              <option value="auto-4">Smart Auto-Indent (4 Spaces)</option>
-              <option value="tab-2">Convert Tabs → 2 Spaces</option>
-              <option value="tab-4">Convert Tabs → 4 Spaces</option>
-              <option value="keep">Preserve Original Indentation</option>
+              <option value="auto-2" ${codePrefs.indentStyle === 'auto-2' || !codePrefs.indentStyle ? 'selected' : ''}>Smart Auto-Indent (2 Spaces)</option>
+              <option value="auto-4" ${codePrefs.indentStyle === 'auto-4' ? 'selected' : ''}>Smart Auto-Indent (4 Spaces)</option>
+              <option value="tab-2" ${codePrefs.indentStyle === 'tab-2' ? 'selected' : ''}>Convert Tabs → 2 Spaces</option>
+              <option value="tab-4" ${codePrefs.indentStyle === 'tab-4' ? 'selected' : ''}>Convert Tabs → 4 Spaces</option>
+              <option value="keep" ${codePrefs.indentStyle === 'keep' ? 'selected' : ''}>Preserve Original Indentation</option>
             </select>
           </div>
 
@@ -5590,7 +5547,7 @@ function getSidebarHtml() {
                             appendStatus('Phase 3 error: ' + err);
                             if (btn) btn.disabled = false;
                           })
-                          .smartAutoFormatPhase('typography');
+                          .smartAutoFormatPhase('typography', getTypographyOptions());
                       }, 1500);
                     })
                     .withFailureHandler(function(err) {
@@ -5598,7 +5555,7 @@ function getSidebarHtml() {
                       appendStatus('Phase 2 error: ' + err);
                       if (btn) btn.disabled = false;
                     })
-                    .smartAutoFormatPhase('tables');
+                    .smartAutoFormatPhase('tables', getTableOptions());
                 }, 1500);
               })
               .withFailureHandler(function(err) {
@@ -5606,7 +5563,7 @@ function getSidebarHtml() {
                 appendStatus('Phase 1 error: ' + err);
                 if (btn) btn.disabled = false;
               })
-              .smartAutoFormatPhase('bookmarks+code');
+              .smartAutoFormatPhase('bookmarks+code', getCodeOptions());
           }
 
           function runRemoveBookmarks() {
@@ -5950,9 +5907,9 @@ function getSidebarHtml() {
           function saveCurrentCodeOptions() {
             clearTimeout(_saveCodeTimer);
             _saveCodeTimer = setTimeout(function() {
-              // Persist ALL current code options (including token colors) to server
+              // Persist ALL current code options (including token colors) to server immediately
               google.script.run.saveUserPreferences(getCodeOptions());
-            }, 500);
+            }, 100);
           }
 
           function syncColorFromText(pickerId, hexVal) {
@@ -6153,10 +6110,11 @@ function getSidebarHtml() {
               .undoSelectedCodeBlockFormatting();
           }
 
-          // Initialize previews on load
+          // Initialize previews on load without overwriting saved custom settings
           updateTypographyPreview();
-          onTableThemeChange();
-          onCodeThemeChange();
+          updateTablePreview();
+          syncAllHexInputs();
+          updateCodePreview();
 
           /* =========================================================
              TEMPLATES TAB LOGIC

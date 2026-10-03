@@ -904,11 +904,18 @@ function reformatSingleCodeBlockTable(table, options, preloadedBody) {
   if (row.getNumCells() !== 1) return false;
 
   const body = preloadedBody || DocumentApp.getActiveDocument().getBody();
-  const fontSize   = Number(options.fontSize) || 9.5;
-  const fontFamily = options.fontFamily || 'Consolas';
-  const textColor  = options.textColor  || '#24292F';
-  const bgColor    = options.bgColor    || '#F6F8FA';
-  const borderColor = options.borderColor || '#D0D7DE';
+  options = options || getUserPreferences();
+  const themeName = options.theme || 'github-light';
+  const themeDef = (typeof CODE_THEMES !== 'undefined' && CODE_THEMES[themeName])
+    ? CODE_THEMES[themeName]
+    : CODE_THEMES['github-light'];
+  const isCustom = options.theme === 'custom';
+
+  const fontSize    = Number(options.fontSize) || 9.5;
+  const fontFamily  = options.fontFamily || 'Consolas';
+  const textColor   = normalizeHexColor(isCustom ? options.textColor : (themeDef ? themeDef.text : options.textColor), themeDef ? themeDef.text : '#24292F');
+  const bgColor     = normalizeHexColor(isCustom ? options.bgColor : (themeDef ? themeDef.bg : options.bgColor), themeDef ? themeDef.bg : '#F6F8FA');
+  const borderColor = normalizeHexColor(isCustom ? options.borderColor : (themeDef ? themeDef.border : options.borderColor), themeDef ? themeDef.border : '#D0D7DE');
   const indentStyle = options.indentStyle || 'keep';
 
   // Update table border
@@ -954,20 +961,20 @@ function reformatSingleCodeBlockTable(table, options, preloadedBody) {
 
     // Reset paragraph text (clears previous syntax highlighting character runs)
     line.setText(textLine);
-    try { line.setFontFamily(fontFamily); } catch(e) {}
-    try { line.setFontSize(fontSize); } catch(e) {}
     try { line.setLineSpacing(1.15); } catch(e) {}
     try { line.setSpacingBefore(0); } catch(e) {}
     try { line.setSpacingAfter(0); } catch(e) {}
-    try { line.setForegroundColor(textColor); } catch(e) {}
 
     const textObj = line.editAsText();
     const len = textObj.getText().length;
     if (len > 0) {
       try { textObj.setBold(false); } catch(e) {}
       try { textObj.setBold(0, len - 1, false); } catch(e) {}
+      try { textObj.setFontFamily(fontFamily); } catch(e) {}
       try { textObj.setFontFamily(0, len - 1, fontFamily); } catch(e) {}
+      try { textObj.setFontSize(fontSize); } catch(e) {}
       try { textObj.setFontSize(0, len - 1, fontSize); } catch(e) {}
+      try { textObj.setForegroundColor(textColor); } catch(e) {}
       try { textObj.setForegroundColor(0, len - 1, textColor); } catch(e) {}
       try { textObj.setBackgroundColor(null); } catch(e) {}
 
@@ -1126,7 +1133,13 @@ function highlightAllCodeBlocks(options, preloadedBody) {
   }
 
   if (codeGroups.length === 0) {
-    return { success: true, count: 0, message: 'No unformatted code blocks found.' };
+    return {
+      success: true,
+      count: reformatCount,
+      message: reformatCount > 0
+        ? 'Updated ' + reformatCount + ' code block(s) with new styling.'
+        : 'No code blocks found in this document.'
+    };
   }
 
   if (body.getParagraphs().length <= paragraphs.length) {
@@ -1145,7 +1158,7 @@ function highlightAllCodeBlocks(options, preloadedBody) {
 
   return {
     success: true,
-    count: codeGroups.length,
+    count: codeGroups.length + reformatCount,
     message: (reformatCount > 0 || codeGroups.length > 0)
       ? (codeGroups.length > 0 ? 'Formatted ' + codeGroups.length + ' new code block(s)' : 'Updated ' + reformatCount + ' code block(s) with new styling') +
         (codeGroups.length > 0 && reformatCount > 0 ? ' — re-applied theme to ' + reformatCount + ' existing block(s).' : '.')
@@ -1318,13 +1331,24 @@ function normalizeCodeSpacing(lines) {
  * Creates and styles the code table container centered in the document
  */
 function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
+  options = options || getUserPreferences();
+  const themeName = options.theme || 'github-light';
+  const themeDef = (typeof CODE_THEMES !== 'undefined' && CODE_THEMES[themeName])
+    ? CODE_THEMES[themeName]
+    : CODE_THEMES['github-light'];
+  const isCustom = options.theme === 'custom';
+
   const firstParagraph = paragraphGroup[0];
   const insertIndex = body.getChildIndex(firstParagraph);
+
+  const borderColor = normalizeHexColor(isCustom ? options.borderColor : (themeDef ? themeDef.border : options.borderColor), themeDef ? themeDef.border : '#D0D7DE');
+  const bgColor     = normalizeHexColor(isCustom ? options.bgColor : (themeDef ? themeDef.bg : options.bgColor), themeDef ? themeDef.bg : '#F6F8FA');
+  const textColor   = normalizeHexColor(isCustom ? options.textColor : (themeDef ? themeDef.text : options.textColor), themeDef ? themeDef.text : '#24292F');
 
   // Initialize table with a 1x1 grid so column 0 exists before setting width
   const table = body.insertTable(insertIndex, [['']]);
   table.setBorderWidth(1);
-  table.setBorderColor(options.borderColor || '#D0D7DE');
+  table.setBorderColor(borderColor);
   
   // Center code container across document margins
   try {
@@ -1335,7 +1359,7 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
   } catch(e) {}
 
   const cell = table.getRow(0).getCell(0);
-  cell.setBackgroundColor(options.bgColor || '#F6F8FA');
+  cell.setBackgroundColor(bgColor);
   cell.setPaddingTop(8);
   cell.setPaddingBottom(8);
   cell.setPaddingLeft(12);
@@ -1343,7 +1367,6 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
 
   const fontSize = Number(options.fontSize) || 9.5;
   const fontFamily = options.fontFamily || 'Consolas';
-  const textColor = options.textColor || '#24292F';
 
   // Apply indentation handling
   let rawLines = paragraphGroup.map(p => p.getText());
@@ -1370,23 +1393,27 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
     } else {
       line = cell.appendParagraph(textLine);
     }
-    line.setFontFamily(fontFamily);
-    line.setFontSize(fontSize);
     line.setLineSpacing(1.15);
     line.setSpacingBefore(0);
     line.setSpacingAfter(0);
-    line.setForegroundColor(textColor);
 
     const textObj = line.editAsText();
-    if (textObj.getText().length > 0) {
-      textObj.setBold(false);
-      try { textObj.setBold(0, textObj.getText().length - 1, false); } catch(e) {}
-    }
+    const len = textObj.getText().length;
+    if (len > 0) {
+      try { textObj.setBold(false); } catch(e) {}
+      try { textObj.setBold(0, len - 1, false); } catch(e) {}
+      try { textObj.setFontFamily(fontFamily); } catch(e) {}
+      try { textObj.setFontFamily(0, len - 1, fontFamily); } catch(e) {}
+      try { textObj.setFontSize(fontSize); } catch(e) {}
+      try { textObj.setFontSize(0, len - 1, fontSize); } catch(e) {}
+      try { textObj.setForegroundColor(textColor); } catch(e) {}
+      try { textObj.setForegroundColor(0, len - 1, textColor); } catch(e) {}
+      try { textObj.setBackgroundColor(null); } catch(e) {}
 
-    // Skip per-token syntax highlighting during Smart Auto-Format to avoid
-    // hitting Document service rate limits (each token = 1 API call).
-    if (!options.skipSyntaxHighlight) {
-      applySyntaxHighlight(textObj, options);
+      // Re-apply per-token syntax highlighting with the new theme
+      if (!options.skipSyntaxHighlight) {
+        applySyntaxHighlight(textObj, options);
+      }
     }
 
     // Pause every 10 lines to let Document service rate-limit quota recover
@@ -1435,16 +1462,20 @@ function formatSelectedCodeBlock(options) {
   let tableFound = null;
 
   elements.forEach(el => {
-    let element = el.getElement();
-    if (element.getType() === DocumentApp.ElementType.TEXT) element = element.getParent();
-    if (element.getType() === DocumentApp.ElementType.PARAGRAPH) {
-      const parent = element.getParent();
-      if (parent && parent.getType() === DocumentApp.ElementType.TABLE_CELL) {
-        const tbl = parent.getParent().getParent().asTable();
-        if (tbl && isCodeBlockTable(tbl)) {
-          tableFound = tbl;
+    let curr = el.getElement();
+    while (curr && curr.getType() !== DocumentApp.ElementType.BODY_SECTION) {
+      if (curr.getType() === DocumentApp.ElementType.TABLE) {
+        if (isCodeBlockTable(curr.asTable())) {
+          tableFound = curr.asTable();
+          break;
         }
-      } else {
+      }
+      curr = curr.getParent();
+    }
+    if (!tableFound) {
+      let element = el.getElement();
+      if (element.getType() === DocumentApp.ElementType.TEXT) element = element.getParent();
+      if (element.getType() === DocumentApp.ElementType.PARAGRAPH) {
         paragraphs.push(element);
       }
     }
@@ -1610,6 +1641,13 @@ function indentSelectedCodeBlock(options) {
  * Indents a single code block in place
  */
 function indentSingleCodeBlock(table, indentStyle, options) {
+  options = options || getUserPreferences();
+  const themeName = options.theme || 'github-light';
+  const themeDef = (typeof CODE_THEMES !== 'undefined' && CODE_THEMES[themeName])
+    ? CODE_THEMES[themeName]
+    : CODE_THEMES['github-light'];
+  const isCustom = options.theme === 'custom';
+
   const cell = table.getRow(0).getCell(0);
   const numChildren = cell.getNumChildren();
   const paragraphs = [];
@@ -1633,23 +1671,28 @@ function indentSingleCodeBlock(table, indentStyle, options) {
   const indentedLines = formatCodeIndentation(rawLines, indentStyle);
   const fontSize = Number(options.fontSize) || 9.5;
   const fontFamily = options.fontFamily || 'Consolas';
-  const textColor = options.textColor || '#24292F';
+  const textColor = normalizeHexColor(isCustom ? options.textColor : (themeDef ? themeDef.text : options.textColor), themeDef ? themeDef.text : '#24292F');
 
   for (let i = 0; i < paragraphs.length; i++) {
     const p = paragraphs[i];
     p.setText(indentedLines[i]);
-    p.setFontFamily(fontFamily);
-    p.setFontSize(fontSize);
     p.setLineSpacing(1.15);
     p.setSpacingBefore(0);
     p.setSpacingAfter(0);
-    p.setForegroundColor(textColor);
     const textObj = p.editAsText();
-    if (textObj.getText().length > 0) {
-      textObj.setBold(false);
-      try { textObj.setBold(0, textObj.getText().length - 1, false); } catch(e) {}
+    const len = textObj.getText().length;
+    if (len > 0) {
+      try { textObj.setBold(false); } catch(e) {}
+      try { textObj.setBold(0, len - 1, false); } catch(e) {}
+      try { textObj.setFontFamily(fontFamily); } catch(e) {}
+      try { textObj.setFontFamily(0, len - 1, fontFamily); } catch(e) {}
+      try { textObj.setFontSize(fontSize); } catch(e) {}
+      try { textObj.setFontSize(0, len - 1, fontSize); } catch(e) {}
+      try { textObj.setForegroundColor(textColor); } catch(e) {}
+      try { textObj.setForegroundColor(0, len - 1, textColor); } catch(e) {}
+      try { textObj.setBackgroundColor(null); } catch(e) {}
+      applySyntaxHighlight(textObj, options);
     }
-    applySyntaxHighlight(textObj, options);
   }
 }
 
@@ -1846,28 +1889,26 @@ function applySyntaxHighlight(textObj, options) {
   const themeDef = (typeof CODE_THEMES !== 'undefined' && CODE_THEMES[themeName])
     ? CODE_THEMES[themeName]
     : CODE_THEMES['github-light'];
+  const isCustom = options.theme === 'custom';
 
-  const kwColor   = normalizeHexColor(options.keywordColor, themeDef.kw);
-  const strColor  = normalizeHexColor(options.stringColor, themeDef.str);
-  // RULE: Comment color is always FIXED — user cannot change it; it is immune to theme changes.
-  const FIXED_COMMENT_COLOR = '#6E7781';
-  const comColor  = FIXED_COMMENT_COLOR;
-  const numColor  = normalizeHexColor(options.numberColor, themeDef.num);
-  const fnColor   = normalizeHexColor(options.functionColor, themeDef.fn || '#8250DF');
-  const typeColor = normalizeHexColor(options.typeColor, themeDef.type || '#953800');
-  const boolColor = normalizeHexColor(options.boolColor || (options.theme !== 'custom' && themeDef ? themeDef.bool : null), kwColor);
-  const specColor = normalizeHexColor(options.specialColor || (options.theme !== 'custom' && themeDef ? themeDef.special : null), kwColor);
-  const opColor   = normalizeHexColor(options.operatorColor || (options.theme !== 'custom' && themeDef ? themeDef.op : null), kwColor);
+  const kwColor   = normalizeHexColor(isCustom ? options.keywordColor : (themeDef ? themeDef.kw : options.keywordColor), themeDef ? themeDef.kw : '#CF222E');
+  const strColor  = normalizeHexColor(isCustom ? options.stringColor : (themeDef ? themeDef.str : options.stringColor), themeDef ? themeDef.str : '#0A3069');
+  const comColor  = normalizeHexColor(isCustom ? options.commentColor : (themeDef ? themeDef.com : options.commentColor), themeDef ? themeDef.com : '#6E7781');
+  const numColor  = normalizeHexColor(isCustom ? options.numberColor : (themeDef ? themeDef.num : options.numberColor), themeDef ? themeDef.num : '#0550AE');
+  const fnColor   = normalizeHexColor(isCustom ? options.functionColor : (themeDef ? themeDef.fn : options.functionColor), themeDef ? (themeDef.fn || '#8250DF') : '#8250DF');
+  const typeColor = normalizeHexColor(isCustom ? options.typeColor : (themeDef ? themeDef.type : options.typeColor), themeDef ? (themeDef.type || '#953800') : '#953800');
+  const boolColor = normalizeHexColor(isCustom ? (options.boolColor || kwColor) : (themeDef ? themeDef.bool : kwColor), kwColor);
+  const specColor = normalizeHexColor(isCustom ? (options.specialColor || kwColor) : (themeDef ? themeDef.special : kwColor), kwColor);
+  const opColor   = normalizeHexColor(isCustom ? (options.operatorColor || kwColor) : (themeDef ? themeDef.op : kwColor), kwColor);
 
   const trimmed = text.trim();
 
-  // RULE: Code comments must NEVER change color based on code tokens.
-  // Full-line comments are formatted with fixed comment color immediately and exit.
-  if (/^(\/\/|#|--|\/\*|\*|\*\/|"""|'''|rem\b|;)/i.test(trimmed)) {
+  // Full-line comments are formatted with comment color immediately and exit.
+  if (/^(\/\/|#|--|\/\*|\*(?!\S)|\*\/|"""|'''|rem\b)/i.test(trimmed)) {
     try {
       textObj.setForegroundColor(0, text.length - 1, comColor);
     } catch(e) {}
-    return; // Complete immunity: never let any code token recolor any part of a comment!
+    return;
   }
 
   const occupied = new Array(text.length).fill(false);
@@ -1951,21 +1992,27 @@ function getUserPreferences() {
   if (saved) {
     try { prefs = JSON.parse(saved); } catch(e) {}
   }
-  return Object.assign({
-    theme: 'github-light',
+  const theme = (prefs && prefs.theme) ? prefs.theme : 'github-light';
+  const themeDef = (typeof CODE_THEMES !== 'undefined' && CODE_THEMES[theme])
+    ? CODE_THEMES[theme]
+    : (typeof CODE_THEMES !== 'undefined' ? CODE_THEMES['github-light'] : null);
+
+  const defaults = {
+    theme: theme,
     fontSize: '9.5',
     fontFamily: 'Consolas',
     indentStyle: 'auto-2',
-    bgColor: '#F6F8FA',
-    textColor: '#24292F',
-    borderColor: '#D0D7DE',
-    keywordColor: '#CF222E',
-    stringColor: '#0A3069',
-    commentColor: '#6E7781',
-    numberColor: '#0550AE',
-    functionColor: '#8250DF',
-    typeColor: '#953800'
-  }, prefs || {});
+    bgColor: themeDef ? themeDef.bg : '#F6F8FA',
+    textColor: themeDef ? themeDef.text : '#24292F',
+    borderColor: themeDef ? themeDef.border : '#D0D7DE',
+    keywordColor: themeDef ? themeDef.kw : '#CF222E',
+    stringColor: themeDef ? themeDef.str : '#0A3069',
+    commentColor: themeDef ? themeDef.com : '#6E7781',
+    numberColor: themeDef ? themeDef.num : '#0550AE',
+    functionColor: themeDef ? (themeDef.fn || '#8250DF') : '#8250DF',
+    typeColor: themeDef ? (themeDef.type || '#953800') : '#953800'
+  };
+  return Object.assign(defaults, prefs || {});
 }
 
 /* ==========================================================================
@@ -5956,8 +6003,7 @@ function getSidebarHtml() {
               document.getElementById('cBorderColor').value = t.border;
               document.getElementById('cKwColor').value = t.kw;
               document.getElementById('cStrColor').value = t.str;
-              // NOTE: Comment color stays fixed at #6E7781 regardless of theme
-              document.getElementById('cComColor').value = '#6E7781';
+              document.getElementById('cComColor').value = t.com || '#6E7781';
               document.getElementById('cNumColor').value = t.num;
               if (document.getElementById('cFnColor')) document.getElementById('cFnColor').value = t.fn;
               if (document.getElementById('cTypeColor')) document.getElementById('cTypeColor').value = t.type;

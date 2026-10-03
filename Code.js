@@ -1193,6 +1193,13 @@ function isCodeStart(text) {
   if (/^(class|interface|struct|enum|record)\s+\w[\w\s<>,]*:?\s*$/.test(trimmed)) return true;
   if (/^(function|def|method|procedure|constructor|fn)\s+\w[\w\s(),<>]*:?\s*$/.test(trimmed)) return true;
 
+  // Pseudocode block keywords (ALGORITHM, INPUT:, OUTPUT:, PROCEDURE, FOR EACH, etc.)
+  if (/^(ALGORITHM|PROCEDURE|FUNCTION|SUBROUTINE)\b/.test(trimmed)) return true;
+  if (/^(INPUT|OUTPUT|PRECONDITION|POSTCONDITION|REQUIRE|ENSURE)\s*:/.test(trimmed)) return true;
+  if (/^(FOR\s+EACH|FOR\s+ALL|FOR\s+EVERY|WHILE|REPEAT|UNTIL|DO\s+WHILE)\b/i.test(trimmed)) return true;
+  if (/\b(IF|THEN|ELSE|END\s+IF|END\s+WHILE|END\s+FOR|END\s+PROCEDURE|RETURN|CALL|OUTPUT)\b/.test(trimmed) && !/[.!?]$/.test(trimmed)) return true;
+  if (/(<-|←|:=)/.test(trimmed)) return true;
+
   const startPatterns = [
     /^(def|class|function|const|let|var|import|export|public|private|protected|static|package|namespace)\b/,
     /^(if|for|while|switch|catch|with|elif)\s*(\(|:)/,
@@ -1389,9 +1396,20 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
     let line;
     if (idx === 0) {
       line = cell.getChild(0).asParagraph();
-      line.setText(textLine);
+      // setText('') throws "Cannot insert an empty text element" — use clear approach
+      if (textLine && textLine.length > 0) {
+        line.setText(textLine);
+      } else {
+        try { line.setText(' '); } catch(e) {}
+        try { line.setText(''); } catch(e) {}
+      }
     } else {
-      line = cell.appendParagraph(textLine);
+      // appendParagraph('') throws — use appendParagraph() with no args for empty lines
+      if (textLine && textLine.length > 0) {
+        line = cell.appendParagraph(textLine);
+      } else {
+        line = cell.appendParagraph();
+      }
     }
     line.setLineSpacing(1.15);
     line.setSpacingBefore(0);
@@ -1893,7 +1911,8 @@ function applySyntaxHighlight(textObj, options) {
 
   const kwColor   = normalizeHexColor(isCustom ? options.keywordColor : (themeDef ? themeDef.kw : options.keywordColor), themeDef ? themeDef.kw : '#CF222E');
   const strColor  = normalizeHexColor(isCustom ? options.stringColor : (themeDef ? themeDef.str : options.stringColor), themeDef ? themeDef.str : '#0A3069');
-  const comColor  = normalizeHexColor(isCustom ? options.commentColor : (themeDef ? themeDef.com : options.commentColor), themeDef ? themeDef.com : '#6E7781');
+  // Comment color is ALWAYS fixed to #6E7781 — never changed by theme or custom settings
+  const comColor  = '#6E7781';
   const numColor  = normalizeHexColor(isCustom ? options.numberColor : (themeDef ? themeDef.num : options.numberColor), themeDef ? themeDef.num : '#0550AE');
   const fnColor   = normalizeHexColor(isCustom ? options.functionColor : (themeDef ? themeDef.fn : options.functionColor), themeDef ? (themeDef.fn || '#8250DF') : '#8250DF');
   const typeColor = normalizeHexColor(isCustom ? options.typeColor : (themeDef ? themeDef.type : options.typeColor), themeDef ? (themeDef.type || '#953800') : '#953800');
@@ -2416,6 +2435,20 @@ function applyMarkdownToParagraph(p) {
     { re: /\*([^*]+)\*|_([^_]+)_/, apply: function(t, s, e) { t.setItalic(s, e, true); }, marker: 1 }
   ];
 
+  // Bold text between a full stop (.) and a colon (:): e.g. ".My label:" → "My label" bolded
+  {
+    const periodColonRe = /\.([A-Za-z][^.:!?\n]{1,120}?)\s*:/g;
+    let pcMatch;
+    let rawText = p.getText();
+    while ((pcMatch = periodColonRe.exec(rawText)) !== null) {
+      const contentStart = pcMatch.index + 1; // after the '.'
+      const contentEnd   = pcMatch.index + pcMatch[0].length - 2; // before the ':'
+      if (contentEnd >= contentStart) {
+        try { p.editAsText().setBold(contentStart, contentEnd, true); } catch(eBold) {}
+      }
+    }
+  }
+
   let changed = false;
   for (let pi = 0; pi < PATTERNS.length; pi++) {
     const pat = PATTERNS[pi];
@@ -2718,7 +2751,12 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
   // 2. Explicit Title prefixes: "Title: ...", "Document Title: ...", "Project Title: ..."
   const titlePrefixMatch = text.match(/^(?:Document\s+Title|Project\s+Title|Paper\s+Title|Report\s+Title|Title)\s*[:–—]\s*(.+)$/i);
   if (titlePrefixMatch) {
+    if (state.titleApplied) {
+      state.lastHeadingLevel = 1;
+      return { role: 'heading1', headingLevel: 1, cleanText: titlePrefixMatch[1].trim() };
+    }
     state.hasTitle = true;
+    state.titleApplied = true;
     return { role: 'title', headingLevel: 1, cleanText: titlePrefixMatch[1].trim() };
   }
 
@@ -2727,7 +2765,13 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
   try { existingHeading = p.getHeading(); } catch(e) {}
   if (existingHeading && existingHeading !== DocumentApp.ParagraphHeading.NORMAL) {
     if (existingHeading === DocumentApp.ParagraphHeading.TITLE) {
+      // If a title was already applied earlier in the document, downgrade this to HEADING1
+      if (state.titleApplied) {
+        state.lastHeadingLevel = 1;
+        return { role: 'heading1', headingLevel: 1, cleanText: text };
+      }
       state.hasTitle = true;
+      state.titleApplied = true;
       return { role: 'title', headingLevel: 1, cleanText: text };
     }
     if (existingHeading === (DocumentApp.ParagraphHeading.HEADING1 || DocumentApp.ParagraphHeading.HEADING_1)) {
@@ -3141,6 +3185,21 @@ function formatSelectedAs(targetType, options) {
     if (!p) continue;
 
     if (targetType === 'title') {
+      // RULE: Only ONE title in the whole document.
+      // Downgrade any existing TITLE paragraphs to HEADING1 first.
+      const numChildren = body.getNumChildren();
+      for (let bi = 0; bi < numChildren; bi++) {
+        const child = body.getChild(bi);
+        if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+          const existPara = child.asParagraph();
+          let existHeading = null;
+          try { existHeading = existPara.getHeading(); } catch(ee) {}
+          if (existHeading === DocumentApp.ParagraphHeading.TITLE && existPara !== p) {
+            safeSetHeading(existPara, getHeadingConstant('HEADING1'));
+            formatSingleHeading(body, existPara, options.heading1);
+          }
+        }
+      }
       safeSetHeading(p, getHeadingConstant('TITLE'));
       formatSingleHeading(body, p, options.title);
       count++;
@@ -3567,6 +3626,79 @@ function undoDocumentTypography() {
     success: true,
     count: count,
     message: 'Reset typography for ' + count + ' paragraph(s) and headings back to document defaults.'
+  };
+}
+
+/**
+ * Resets the selected text/headings back to standard Google Docs defaults.
+ * Only touches the currently selected paragraphs (not the whole document).
+ */
+function undoSelectedTypographyFormatting() {
+  const doc = DocumentApp.getActiveDocument();
+  const selection = doc.getSelection();
+  if (!selection) {
+    return { success: false, message: 'Please highlight or select text in your document first.' };
+  }
+
+  const body = doc.getBody();
+  const elements = selection.getSelectedElements();
+  let count = 0;
+
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    let p = null;
+    if (el.getElement().getType() === DocumentApp.ElementType.PARAGRAPH) {
+      p = el.getElement().asParagraph();
+    } else if (el.getElement().getType() === DocumentApp.ElementType.TEXT) {
+      const parent = el.getElement().getParent();
+      if (parent.getType() === DocumentApp.ElementType.PARAGRAPH) {
+        p = parent.asParagraph();
+      }
+    }
+    if (!p) continue;
+
+    const heading = p.getHeading();
+    let defaultFont = 'Arial';
+    let defaultSize = 11;
+    let defaultBold = false;
+    let defaultColor = '#000000';
+
+    if (heading === DocumentApp.ParagraphHeading.TITLE) {
+      defaultSize = 26; defaultBold = true;
+    } else if (heading === DocumentApp.ParagraphHeading.HEADING1) {
+      defaultSize = 20; defaultBold = true;
+    } else if (heading === DocumentApp.ParagraphHeading.HEADING2) {
+      defaultSize = 16; defaultBold = true;
+    } else if (heading === DocumentApp.ParagraphHeading.HEADING3) {
+      defaultSize = 14; defaultBold = true; defaultColor = '#434343';
+    } else if (heading === DocumentApp.ParagraphHeading.SUBTITLE) {
+      defaultSize = 15; defaultColor = '#666666';
+    } else if (heading !== DocumentApp.ParagraphHeading.NORMAL) {
+      defaultSize = 13; defaultBold = true;
+    }
+
+    p.setAlignment(DocumentApp.HorizontalAlignment.LEFT);
+    try { p.setFontFamily(defaultFont); } catch(e) {}
+    try { p.setFontSize(defaultSize); } catch(e) {}
+    p.setLineSpacing(1.15);
+
+    const textObj = p.editAsText();
+    if (textObj.getText().length > 0) {
+      try { textObj.setFontFamily(defaultFont); } catch(e) {}
+      try { textObj.setFontSize(defaultSize); } catch(e) {}
+      try { textObj.setBold(defaultBold); } catch(e) {}
+      try { textObj.setForegroundColor(defaultColor); } catch(e) {}
+      try { textObj.setBackgroundColor(null); } catch(e) {}
+    }
+    count++;
+  }
+
+  return {
+    success: count > 0,
+    count: count,
+    message: count > 0
+      ? 'Reset formatting for ' + count + ' selected element(s) to document defaults.'
+      : 'No text element found in selection to reset.'
   };
 }
 
@@ -4559,6 +4691,9 @@ function getSidebarHtml() {
 
           <button class="btn-primary" id="btnFormatDocTypo" onclick="runFormatDocumentTypography()" style="margin-top:10px;">
             <span>✍️</span> Format All Document Typography
+          </button>
+          <button class="btn-secondary" id="btnUndoSelectedTypo" onclick="runUndoSelectedTypography()" style="color:#6b7280;border-color:#e5e7eb;">
+            ↩ Undo Selected Text Formatting
           </button>
           <button class="btn-danger" id="btnUndoDocTypo" onclick="runUndoDocumentTypography()">
             <span>↩</span> Undo Document Text Formatting
@@ -5683,6 +5818,21 @@ function getSidebarHtml() {
               .undoDocumentTypography();
           }
 
+          function runUndoSelectedTypography() {
+            setTypographyStatus('Resetting selected text formatting...', 'loading');
+            document.getElementById('btnUndoSelectedTypo').disabled = true;
+            google.script.run
+              .withSuccessHandler(res => {
+                document.getElementById('btnUndoSelectedTypo').disabled = false;
+                setTypographyStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('btnUndoSelectedTypo').disabled = false;
+                setTypographyStatus('Error: ' + err, 'error');
+              })
+              .undoSelectedTypographyFormatting();
+          }
+
           function runFormatSelectedAs(targetType) {
             setTypographyStatus('Applying ' + targetType + ' formatting to selected text...', 'loading');
             google.script.run
@@ -5837,7 +5987,7 @@ function getSidebarHtml() {
               bodyFontSize: document.getElementById('tableBodyFontSelect').value,
               padding: document.getElementById('tablePaddingSelect').value,
               textColor: '#1E293B',
-              borderWidth: parseFloat(document.getElementById('tableBorderWidthSelect').value) || 1,
+              borderWidth: (function() { var v = parseFloat(document.getElementById('tableBorderWidthSelect').value); return isNaN(v) ? 1 : v; })(),
               inlineCodeHighlight: document.getElementById('tInlineCodeToggle').checked,
               inlineCodeBg: document.getElementById('tInlineCodeBg').value,
               inlineCodeColor: document.getElementById('tInlineCodeColor').value

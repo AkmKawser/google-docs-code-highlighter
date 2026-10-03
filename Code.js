@@ -438,7 +438,17 @@ function undoSingleTableFormatting(table) {
  */
 var _codeBlockTableCache = null; // reset per smart-format run
 
+function isMonospaceFont(font) {
+  if (!font) return false;
+  const f = font.toLowerCase();
+  return f.includes('consolas') || f.includes('jetbrains') || f.includes('courier') ||
+         f.includes('roboto mono') || f.includes('inconsolata') || f.includes('source code') ||
+         f.includes('space mono') || f.includes('pt mono') || f.includes('ubuntu mono') ||
+         f.includes('mono') || f.includes('menlo') || f.includes('monaco') || f.includes('fira code');
+}
+
 function isCodeBlockTable(table) {
+  if (!table || table.getType() !== DocumentApp.ElementType.TABLE) return false;
   // Fast structural check first (no API)
   if (table.getNumRows() !== 1) return false;
   const row = table.getRow(0);
@@ -449,39 +459,57 @@ function isCodeBlockTable(table) {
     if (_codeBlockTableCache.has(table)) return _codeBlockTableCache.get(table);
   }
 
-  // Cheap color checks before the expensive font check
   let result = false;
   try {
     const cell = row.getCell(0);
-    const bg = cell.getBackgroundColor();
-    // Common code block backgrounds
-    if (bg && (bg === '#F6F8FA' || bg === '#f6f8fa' ||
-               bg === '#1E1E1E' || bg === '#1e1e1e' ||
-               bg === '#282C34' || bg === '#282c34' ||
-               bg === '#0D1117' || bg === '#0d1117' ||
-               bg === '#272822' || bg === '#272822' ||
-               bg === '#FAFAFA' || bg === '#fafafa' ||
-               bg === '#F8F8F2' || bg === '#f8f8f2')) {
+    const bg = (cell.getBackgroundColor() || '').toLowerCase();
+    // Known theme and code backgrounds
+    const knownBgs = [
+      '#f6f8fa', '#21252b', '#282a36', '#272822', '#fdf6e3',
+      '#1e1e1e', '#282c34', '#0d1117', '#fafafa', '#f8f8f2',
+      '#1a1b26', '#2e3440', '#002b36', '#263238', '#282828'
+    ];
+    if (bg && knownBgs.includes(bg)) {
       result = true;
     } else {
-      // Fallback: check font family of first non-empty paragraph
+      // Check font family of paragraphs (both paragraph level and text element level)
       const numChildren = cell.getNumChildren();
       for (let i = 0; i < numChildren && !result; i++) {
         const child = cell.getChild(i);
         if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
-          const text = child.asParagraph().editAsText();
+          const para = child.asParagraph();
+          let font = para.getFontFamily();
+          if (font && isMonospaceFont(font)) {
+            result = true;
+            break;
+          }
+          const text = para.editAsText();
           if (text.getText().length > 0) {
-            const font = text.getFontFamily(0);
-            if (font && (
-              font === 'Consolas' || font === 'JetBrains Mono' ||
-              font === 'Courier New' || font === 'Roboto Mono' ||
-              font === 'Inconsolata' || font === 'Source Code Pro' ||
-              font === 'Space Mono' || font === 'PT Mono' ||
-              font === 'Ubuntu Mono' || font.toLowerCase().includes('mono')
-            )) {
+            font = text.getFontFamily(0);
+            if (font && isMonospaceFont(font)) {
               result = true;
+              break;
             }
           }
+        }
+      }
+
+      // Fallback: check code patterns in lines if still not confirmed
+      if (!result && numChildren > 0) {
+        let codeLines = 0;
+        let inspected = 0;
+        for (let i = 0; i < Math.min(numChildren, 6); i++) {
+          const child = cell.getChild(i);
+          if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+            inspected++;
+            const t = child.asParagraph().getText().trim();
+            if (isCodeLine(t) || /[{};=()\[\]]/.test(t) || /^\s{2,}|\t/.test(t)) {
+              codeLines++;
+            }
+          }
+        }
+        if (inspected > 0 && codeLines >= Math.ceil(inspected * 0.5)) {
+          result = true;
         }
       }
     }
@@ -893,71 +921,112 @@ function quickUndoAllCodeBlocks() {
  * in the document without unwrapping and re-wrapping them.
  * Called automatically at the start of highlightAllCodeBlocks().
  */
+/**
+ * Re-applies the current theme/colors to all existing 1x1 code block tables
+ * in the document without unwrapping and re-wrapping them.
+ * Called automatically at the start of highlightAllCodeBlocks().
+ */
 function reformatExistingCodeBlocks(body, options) {
   const tables = body.getTables();
   if (!tables || tables.length === 0) return 0;
-
-  const fontSize   = Number(options.fontSize) || 9.5;
-  const fontFamily = options.fontFamily || 'Consolas';
-  const textColor  = options.textColor  || '#24292F';
-  const bgColor    = options.bgColor    || '#F6F8FA';
-  const borderColor = options.borderColor || '#D0D7DE';
 
   let count = 0;
   for (let t = tables.length - 1; t >= 0; t--) {
     const table = tables[t];
     if (!isCodeBlockTable(table)) continue;
-
-    // Update table border
-    try { table.setBorderWidth(1); } catch(e) {}
-    try { table.setBorderColor(borderColor); } catch(e) {}
-
-    // Re-center column width
-    try {
-      const pageWidth   = body.getPageWidth();
-      const marginLeft  = body.getMarginLeft();
-      const marginRight = body.getMarginRight();
-      table.setColumnWidth(0, Math.max(100, pageWidth - marginLeft - marginRight));
-    } catch(e) {}
-
-    const cell = table.getRow(0).getCell(0);
-    try { cell.setBackgroundColor(bgColor); } catch(e) {}
-
-    const numChildren = cell.getNumChildren();
-    for (let i = 0; i < numChildren; i++) {
-      const child = cell.getChild(i);
-      if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
-      const line = child.asParagraph();
-
-      // Reset paragraph-level formatting
-      try { line.setFontFamily(fontFamily); } catch(e) {}
-      try { line.setFontSize(fontSize); } catch(e) {}
-      try { line.setLineSpacing(1.15); } catch(e) {}
-      try { line.setSpacingBefore(0); } catch(e) {}
-      try { line.setSpacingAfter(0); } catch(e) {}
-      try { line.setForegroundColor(textColor); } catch(e) {}
-
-      // Reset character-level formatting then re-apply syntax highlight
-      const textObj = line.editAsText();
-      const len = textObj.getText().length;
-      if (len > 0) {
-        try { textObj.setBold(false); } catch(e) {}
-        try { textObj.setFontFamily(fontFamily); } catch(e) {}
-        try { textObj.setFontSize(fontSize); } catch(e) {}
-        try { textObj.setForegroundColor(textColor); } catch(e) {}
-        try { textObj.setBackgroundColor(null); } catch(e) {}
-        // Re-apply per-token syntax highlighting
-        if (!options.skipSyntaxHighlight) {
-          applySyntaxHighlight(textObj, options);
-        }
-      }
-
-      // Throttle to avoid rate-limit errors on long code blocks
-      if (i > 0 && i % 10 === 0) Utilities.sleep(50);
-    }
+    reformatSingleCodeBlockTable(table, options, body);
     count++;
   }
   return count;
+}
+
+/**
+ * Re-formats a single 1x1 code block table in place with new options/theme
+ */
+function reformatSingleCodeBlockTable(table, options, preloadedBody) {
+  if (!table || table.getType() !== DocumentApp.ElementType.TABLE) return false;
+  if (table.getNumRows() !== 1) return false;
+  const row = table.getRow(0);
+  if (row.getNumCells() !== 1) return false;
+
+  const body = preloadedBody || DocumentApp.getActiveDocument().getBody();
+  const fontSize   = Number(options.fontSize) || 9.5;
+  const fontFamily = options.fontFamily || 'Consolas';
+  const textColor  = options.textColor  || '#24292F';
+  const bgColor    = options.bgColor    || '#F6F8FA';
+  const borderColor = options.borderColor || '#D0D7DE';
+  const indentStyle = options.indentStyle || 'keep';
+
+  // Update table border
+  try { table.setBorderWidth(1); } catch(e) {}
+  try { table.setBorderColor(borderColor); } catch(e) {}
+
+  // Re-center column width
+  try {
+    const pageWidth   = body.getPageWidth();
+    const marginLeft  = body.getMarginLeft();
+    const marginRight = body.getMarginRight();
+    table.setColumnWidth(0, Math.max(100, pageWidth - marginLeft - marginRight));
+  } catch(e) {}
+
+  const cell = row.getCell(0);
+  try { cell.setBackgroundColor(bgColor); } catch(e) {}
+  try { cell.setPaddingTop(8); } catch(e) {}
+  try { cell.setPaddingBottom(8); } catch(e) {}
+  try { cell.setPaddingLeft(12); } catch(e) {}
+  try { cell.setPaddingRight(12); } catch(e) {}
+
+  const numChildren = cell.getNumChildren();
+  const paragraphs = [];
+  const rawLines = [];
+
+  for (let i = 0; i < numChildren; i++) {
+    const child = cell.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      paragraphs.push(child.asParagraph());
+      rawLines.push(child.asParagraph().getText());
+    }
+  }
+
+  if (paragraphs.length === 0) return true;
+
+  const formattedLines = (indentStyle && indentStyle !== 'keep')
+    ? formatCodeIndentation(rawLines, indentStyle)
+    : rawLines;
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const line = paragraphs[i];
+    const textLine = formattedLines[i] !== undefined ? formattedLines[i] : rawLines[i];
+
+    // Reset paragraph text (clears previous syntax highlighting character runs)
+    line.setText(textLine);
+    try { line.setFontFamily(fontFamily); } catch(e) {}
+    try { line.setFontSize(fontSize); } catch(e) {}
+    try { line.setLineSpacing(1.15); } catch(e) {}
+    try { line.setSpacingBefore(0); } catch(e) {}
+    try { line.setSpacingAfter(0); } catch(e) {}
+    try { line.setForegroundColor(textColor); } catch(e) {}
+
+    const textObj = line.editAsText();
+    const len = textObj.getText().length;
+    if (len > 0) {
+      try { textObj.setBold(false); } catch(e) {}
+      try { textObj.setBold(0, len - 1, false); } catch(e) {}
+      try { textObj.setFontFamily(0, len - 1, fontFamily); } catch(e) {}
+      try { textObj.setFontSize(0, len - 1, fontSize); } catch(e) {}
+      try { textObj.setForegroundColor(0, len - 1, textColor); } catch(e) {}
+      try { textObj.setBackgroundColor(null); } catch(e) {}
+
+      // Re-apply per-token syntax highlighting with the new theme
+      if (!options.skipSyntaxHighlight) {
+        applySyntaxHighlight(textObj, options);
+      }
+    }
+
+    if (i > 0 && i % 10 === 0) Utilities.sleep(30);
+  }
+
+  return true;
 }
 
 /**
@@ -1381,21 +1450,58 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
 
 function formatSelectedCodeBlock(options) {
   options = options || getUserPreferences();
-  const selection = DocumentApp.getActiveDocument().getSelection();
+  const prefsToSave = Object.assign({}, options);
+  delete prefsToSave.skipSyntaxHighlight;
+  saveUserPreferences(prefsToSave);
+
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+
+  // 1. First check if the cursor or selection is inside an existing code block table
+  const existingTable = getSelectedTable();
+  if (existingTable && isCodeBlockTable(existingTable)) {
+    reformatSingleCodeBlockTable(existingTable, options, body);
+    const themeName = options.theme || 'custom';
+    return { success: true, count: 1, message: 'Updated code block to ' + themeName + ' styling!' };
+  }
+
+  // 2. Otherwise check selection
+  const selection = doc.getSelection();
   if (!selection) {
-    return { success: false, message: 'Please highlight/select the text first.' };
+    if (existingTable && existingTable.getNumRows() === 1 && existingTable.getRow(0).getNumCells() === 1) {
+      reformatSingleCodeBlockTable(existingTable, options, body);
+      return { success: true, count: 1, message: 'Updated code block styling!' };
+    }
+    return { success: false, message: 'Please place cursor in a code block or highlight text first.' };
   }
 
   const elements = selection.getSelectedElements();
   const paragraphs = [];
+  let tableFound = null;
+
   elements.forEach(el => {
     let element = el.getElement();
     if (element.getType() === DocumentApp.ElementType.TEXT) element = element.getParent();
-    if (element.getType() === DocumentApp.ElementType.PARAGRAPH) paragraphs.push(element);
+    if (element.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const parent = element.getParent();
+      if (parent && parent.getType() === DocumentApp.ElementType.TABLE_CELL) {
+        const tbl = parent.getParent().getParent().asTable();
+        if (tbl && isCodeBlockTable(tbl)) {
+          tableFound = tbl;
+        }
+      } else {
+        paragraphs.push(element);
+      }
+    }
   });
 
+  if (tableFound) {
+    reformatSingleCodeBlockTable(tableFound, options, body);
+    return { success: true, count: 1, message: 'Updated code block styling!' };
+  }
+
   if (paragraphs.length > 0) {
-    convertParagraphsToCodeBlock(DocumentApp.getActiveDocument().getBody(), paragraphs, options);
+    convertParagraphsToCodeBlock(body, paragraphs, options);
     return { success: true, count: 1, message: 'Selected code formatted!' };
   }
   return { success: false, message: 'No valid paragraphs selected.' };
@@ -1757,6 +1863,19 @@ const CODE_THEMES = {
  * - Numbers: hex, binary, float, integer
  * - Operators: =>, ===, !==, +, -, *, /, &&, ||, etc.
  */
+function normalizeHexColor(c, fallback) {
+  if (!c || typeof c !== 'string') return fallback || '#000000';
+  let str = c.trim();
+  if (str.startsWith('#')) str = str.substring(1);
+  if (str.length === 3) {
+    str = str[0] + str[0] + str[1] + str[1] + str[2] + str[2];
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(str)) {
+    return '#' + str.toUpperCase();
+  }
+  return fallback || '#000000';
+}
+
 function applySyntaxHighlight(textObj, options) {
   const text = textObj.getText();
   if (!text || text.length === 0) return;
@@ -1773,15 +1892,15 @@ function applySyntaxHighlight(textObj, options) {
     ? CODE_THEMES[themeName]
     : CODE_THEMES['github-light'];
 
-  const kwColor   = options.keywordColor  || themeDef.kw;
-  const strColor  = options.stringColor   || themeDef.str;
-  const comColor  = options.commentColor  || themeDef.com || '#6E7781';
-  const numColor  = options.numberColor   || themeDef.num;
-  const fnColor   = options.functionColor || themeDef.fn || '#8250DF';
-  const typeColor = options.typeColor     || themeDef.type || '#953800';
-  const boolColor = options.boolColor     || themeDef.bool || kwColor;
-  const specColor = options.specialColor  || themeDef.special || kwColor;
-  const opColor   = options.operatorColor || themeDef.op || kwColor;
+  const kwColor   = normalizeHexColor(options.keywordColor, themeDef.kw);
+  const strColor  = normalizeHexColor(options.stringColor, themeDef.str);
+  const comColor  = normalizeHexColor(options.commentColor, themeDef.com || '#6E7781');
+  const numColor  = normalizeHexColor(options.numberColor, themeDef.num);
+  const fnColor   = normalizeHexColor(options.functionColor, themeDef.fn || '#8250DF');
+  const typeColor = normalizeHexColor(options.typeColor, themeDef.type || '#953800');
+  const boolColor = normalizeHexColor(options.boolColor || (options.theme !== 'custom' && themeDef ? themeDef.bool : null), kwColor);
+  const specColor = normalizeHexColor(options.specialColor || (options.theme !== 'custom' && themeDef ? themeDef.special : null), kwColor);
+  const opColor   = normalizeHexColor(options.operatorColor || (options.theme !== 'custom' && themeDef ? themeDef.op : null), kwColor);
 
   const trimmed = text.trim();
 
@@ -1797,8 +1916,6 @@ function applySyntaxHighlight(textObj, options) {
   const occupied = new Array(text.length).fill(false);
 
   // 1. Strings and Inline Comments in exact document order
-  // Strings: "...", '...', `...`
-  // Comments: //..., #..., --..., /*...*/
   const stringOrCommentRegex = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\/\/.*$|#.*$|--.*$|\/\*[\s\S]*?\*\/)/g;
   let scMatch;
   while ((scMatch = stringOrCommentRegex.exec(text)) !== null) {
@@ -1811,7 +1928,7 @@ function applySyntaxHighlight(textObj, options) {
         textObj.setForegroundColor(start, end, strColor);
       } catch(e) {}
     } else if (scMatch[2]) {
-      // Inline comment: claims every character up to end of comment/line with fixed comColor
+      // Inline comment
       const start = scMatch.index;
       const end = start + scMatch[0].length - 1;
       for (let i = start; i <= end; i++) occupied[i] = true;
@@ -1842,23 +1959,23 @@ function applySyntaxHighlight(textObj, options) {
     }
   }
 
-  // 2. Keywords & Declarations
-  apply(/\b(def|class|function|const|let|var|val|fn|sub|procedure|constructor|method|interface|struct|enum|record|type|alias|namespace|package|import|export|from|as|using|public|private|protected|static|final|abstract|override|readonly|mut|volatile|return|if|else|elif|for|while|do|switch|case|default|break|continue|throw|try|catch|finally|yield|await|async|new|delete|typeof|instanceof|lambda|pass|with|in|is|not|and|or|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|JOIN|INNER|LEFT|RIGHT|ON|GROUP|BY|ORDER|HAVING|LIMIT|CREATE|TABLE|ALTER|DROP|SET|VALUES|INTO)\b/g, kwColor, false);
+  // 2. Keywords & Declarations (case-insensitive for SQL and all languages)
+  apply(/\b(def|class|function|const|let|var|val|fn|sub|procedure|constructor|method|interface|struct|enum|record|type|alias|namespace|package|import|export|from|as|using|public|private|protected|static|final|abstract|override|readonly|mut|volatile|return|if|else|elif|for|while|do|switch|case|default|break|continue|throw|try|catch|finally|yield|await|async|new|delete|typeof|instanceof|lambda|pass|with|in|is|not|and|or|select|from|where|insert|update|delete|join|inner|left|right|on|group|by|order|having|limit|create|table|alter|drop|set|values|into)\b/gi, kwColor, false);
 
   // 3. Special Keywords (this, self, super)
-  apply(/\b(this|self|super)\b/g, specColor, false);
+  apply(/\b(this|self|super)\b/gi, specColor, false);
 
-  // 4. Types & Classes (primitives + PascalCase identifier names)
-  apply(/\b(int|float|double|char|bool|boolean|void|string|number|any|unknown|never|byte|short|long|unsigned|object|symbol|bigint)\b/g, typeColor, false);
+  // 4. Booleans & Constants (run BEFORE PascalCase types so True/False/None are colored as booleans)
+  apply(/\b(true|false|null|undefined|nil|none|nan|infinity)\b/gi, boolColor, false);
+  apply(/\b([A-Z_][A-Z0-9_]{2,})\b/g, boolColor, false);
+
+  // 5. Types & Classes (primitives + PascalCase identifier names)
+  apply(/\b(int|float|double|char|bool|boolean|void|string|number|any|unknown|never|byte|short|long|unsigned|object|symbol|bigint)\b/gi, typeColor, false);
   apply(/\b([A-Z][a-zA-Z0-9_$]*)\b/g, typeColor, false);
 
-  // 5. Function / Method calls & headers
+  // 6. Function / Method calls & headers
   apply(/\b([a-zA-Z_$][\w$]*)\s*(?=\()/g, fnColor, true);
   apply(/\b([a-zA-Z_$][\w$]*)\s*(?=:\s*$)/g, fnColor, true);
-
-  // 6. Booleans & Constants
-  apply(/\b(true|false|null|undefined|nil|None|True|False|NaN|Infinity)\b/g, boolColor, false);
-  apply(/\b([A-Z_][A-Z0-9_]{2,})\b/g, boolColor, false);
 
   // 7. Numbers (hex, binary, float, integer)
   apply(/\b(0x[0-9a-fA-F]+|0b[01]+|\d+(\.\d+)?([eE][+-]?\d+)?)\b/g, numColor, false);
@@ -3792,6 +3909,24 @@ function getSidebarHtml() {
             font-weight: 500;
             color: #4b5563;
           }
+          .color-picker-wrap {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+          }
+          .hex-input {
+            width: 65px;
+            padding: 2px 4px !important;
+            font-family: Consolas, monospace !important;
+            font-size: 11px !important;
+            text-transform: uppercase;
+            border: 1px solid #d1d5db !important;
+            border-radius: 4px !important;
+            background: #ffffff !important;
+            color: #1f2937 !important;
+            height: 24px;
+            box-sizing: border-box;
+          }
           .color-row input[type="color"] {
             width: 32px;
             height: 24px;
@@ -4552,7 +4687,7 @@ function getSidebarHtml() {
 
           <div class="control-group">
             <label>Font Size</label>
-            <select id="codeFontSizeSelect" onchange="updateCodePreview()">
+            <select id="codeFontSizeSelect" onchange="updateCodePreview(); saveCurrentCodeOptions();">
               <option value="8">8 pt</option>
               <option value="8.5">8.5 pt (Compact)</option>
               <option value="9">9 pt</option>
@@ -4575,7 +4710,7 @@ function getSidebarHtml() {
 
           <div class="control-group">
             <label>Font Family</label>
-            <select id="codeFontFamilySelect" onchange="updateCodePreview()">
+            <select id="codeFontFamilySelect" onchange="updateCodePreview(); saveCurrentCodeOptions();">
               <option value="Consolas" selected>Consolas (Windows Default)</option>
               <option value="JetBrains Mono">JetBrains Mono (Developer Favorite)</option>
               <option value="Roboto Mono">Roboto Mono (Modern)</option>
@@ -4590,7 +4725,7 @@ function getSidebarHtml() {
 
           <div class="control-group">
             <label>Code Indentation</label>
-            <select id="codeIndentSelect" onchange="updateCodePreview()">
+            <select id="codeIndentSelect" onchange="updateCodePreview(); saveCurrentCodeOptions();">
               <option value="auto-2">Smart Auto-Indent (2 Spaces)</option>
               <option value="auto-4">Smart Auto-Indent (4 Spaces)</option>
               <option value="tab-2">Convert Tabs → 2 Spaces</option>
@@ -4603,15 +4738,24 @@ function getSidebarHtml() {
           <div class="color-grid">
             <div class="color-row">
               <label>Background:</label>
-              <input type="color" id="cBgColor" value="${codePrefs.bgColor}" onchange="setCodeCustomMode()">
+              <div class="color-picker-wrap">
+                <input type="text" id="cBgColorText" class="hex-input" value="${codePrefs.bgColor || '#F6F8FA'}" oninput="syncColorFromText('cBgColor', this.value)">
+                <input type="color" id="cBgColor" value="${codePrefs.bgColor || '#F6F8FA'}" oninput="syncTextFromColor('cBgColorText', this.value)" onchange="setCodeCustomMode()">
+              </div>
             </div>
             <div class="color-row">
               <label>Text Color:</label>
-              <input type="color" id="cTextColor" value="${codePrefs.textColor}" onchange="setCodeCustomMode()">
+              <div class="color-picker-wrap">
+                <input type="text" id="cTextColorText" class="hex-input" value="${codePrefs.textColor || '#24292F'}" oninput="syncColorFromText('cTextColor', this.value)">
+                <input type="color" id="cTextColor" value="${codePrefs.textColor || '#24292F'}" oninput="syncTextFromColor('cTextColorText', this.value)" onchange="setCodeCustomMode()">
+              </div>
             </div>
             <div class="color-row">
               <label>Border:</label>
-              <input type="color" id="cBorderColor" value="${codePrefs.borderColor}" onchange="setCodeCustomMode()">
+              <div class="color-picker-wrap">
+                <input type="text" id="cBorderColorText" class="hex-input" value="${codePrefs.borderColor || '#D0D7DE'}" oninput="syncColorFromText('cBorderColor', this.value)">
+                <input type="color" id="cBorderColor" value="${codePrefs.borderColor || '#D0D7DE'}" oninput="syncTextFromColor('cBorderColorText', this.value)" onchange="setCodeCustomMode()">
+              </div>
             </div>
           </div>
 
@@ -4619,27 +4763,45 @@ function getSidebarHtml() {
           <div class="color-grid">
             <div class="color-row">
               <label>Keywords <small style="opacity:.65">(if, return, class…)</small>:</label>
-              <input type="color" id="cKwColor" value="${codePrefs.keywordColor || '#CF222E'}" onchange="setCodeCustomMode()">
+              <div class="color-picker-wrap">
+                <input type="text" id="cKwColorText" class="hex-input" value="${codePrefs.keywordColor || '#CF222E'}" oninput="syncColorFromText('cKwColor', this.value)">
+                <input type="color" id="cKwColor" value="${codePrefs.keywordColor || '#CF222E'}" oninput="syncTextFromColor('cKwColorText', this.value)" onchange="setCodeCustomMode()">
+              </div>
             </div>
             <div class="color-row">
               <label>Functions & Methods <small style="opacity:.65">(calculateTotal, run…)</small>:</label>
-              <input type="color" id="cFnColor" value="${codePrefs.functionColor || '#8250DF'}" onchange="setCodeCustomMode()">
+              <div class="color-picker-wrap">
+                <input type="text" id="cFnColorText" class="hex-input" value="${codePrefs.functionColor || '#8250DF'}" oninput="syncColorFromText('cFnColor', this.value)">
+                <input type="color" id="cFnColor" value="${codePrefs.functionColor || '#8250DF'}" oninput="syncTextFromColor('cFnColorText', this.value)" onchange="setCodeCustomMode()">
+              </div>
             </div>
             <div class="color-row">
               <label>Types & Classes <small style="opacity:.65">(Invoice, String…)</small>:</label>
-              <input type="color" id="cTypeColor" value="${codePrefs.typeColor || '#953800'}" onchange="setCodeCustomMode()">
+              <div class="color-picker-wrap">
+                <input type="text" id="cTypeColorText" class="hex-input" value="${codePrefs.typeColor || '#953800'}" oninput="syncColorFromText('cTypeColor', this.value)">
+                <input type="color" id="cTypeColor" value="${codePrefs.typeColor || '#953800'}" oninput="syncTextFromColor('cTypeColorText', this.value)" onchange="setCodeCustomMode()">
+              </div>
             </div>
             <div class="color-row">
               <label>Strings <small style="opacity:.65">("text", 'value')</small>:</label>
-              <input type="color" id="cStrColor" value="${codePrefs.stringColor || '#0A3069'}" onchange="setCodeCustomMode()">
+              <div class="color-picker-wrap">
+                <input type="text" id="cStrColorText" class="hex-input" value="${codePrefs.stringColor || '#0A3069'}" oninput="syncColorFromText('cStrColor', this.value)">
+                <input type="color" id="cStrColor" value="${codePrefs.stringColor || '#0A3069'}" oninput="syncTextFromColor('cStrColorText', this.value)" onchange="setCodeCustomMode()">
+              </div>
             </div>
             <div class="color-row">
               <label>Comments <small style="opacity:.65">(// notes)</small>:</label>
-              <input type="color" id="cComColor" value="${codePrefs.commentColor || '#6E7781'}" onchange="setCodeCustomMode()">
+              <div class="color-picker-wrap">
+                <input type="text" id="cComColorText" class="hex-input" value="${codePrefs.commentColor || '#6E7781'}" oninput="syncColorFromText('cComColor', this.value)">
+                <input type="color" id="cComColor" value="${codePrefs.commentColor || '#6E7781'}" oninput="syncTextFromColor('cComColorText', this.value)" onchange="setCodeCustomMode()">
+              </div>
             </div>
             <div class="color-row">
               <label>Numbers <small style="opacity:.65">(42, 3.14)</small>:</label>
-              <input type="color" id="cNumColor" value="${codePrefs.numberColor || '#0550AE'}" onchange="setCodeCustomMode()">
+              <div class="color-picker-wrap">
+                <input type="text" id="cNumColorText" class="hex-input" value="${codePrefs.numberColor || '#0550AE'}" oninput="syncColorFromText('cNumColor', this.value)">
+                <input type="color" id="cNumColor" value="${codePrefs.numberColor || '#0550AE'}" oninput="syncTextFromColor('cNumColorText', this.value)" onchange="setCodeCustomMode()">
+              </div>
             </div>
           </div>
 
@@ -4651,9 +4813,9 @@ function getSidebarHtml() {
             </div>
             <div class="preview-body">
               <div id="codePreviewBox" class="preview-code-box">
-                <span id="pKw" style="color: #0550AE; font-weight: normal;">function</span> <span id="pFn">renderChart</span>() {<br>
-                <span id="pIndent">&nbsp;&nbsp;</span><span id="pCom" style="color: #6E7781;">// Align & format</span><br>
-                <span id="pIndent2">&nbsp;&nbsp;</span><span id="pKw2" style="color: #0550AE; font-weight: normal;">return</span> <span id="pStr" style="color: #0A3069;">"Success!"</span>;<br>
+                <span id="pKw" style="font-weight: normal;">function</span> <span id="pFn">calculateTax</span>(<span id="pArg">amount</span>: <span id="pType">Number</span>) {<br>
+                <span id="pIndent">&nbsp;&nbsp;</span><span id="pCom">// 10% rate</span><br>
+                <span id="pIndent2">&nbsp;&nbsp;</span><span id="pKw2" style="font-weight: normal;">return</span> <span id="pArg2">amount</span> * <span id="pNum">0.10</span> + <span id="pStr">" USD"</span>;<br>
                 }
               </div>
             </div>
@@ -5286,6 +5448,7 @@ function getSidebarHtml() {
             if (btn) btn.disabled = true;
             if (indicators) indicators.style.display = 'block';
             if (statusEl) { statusEl.style.display = 'block'; statusEl.innerText = ''; }
+            try { google.script.run.saveUserPreferences(getCodeOptions()); } catch(e) {}
 
             function setPhase(tag, state, msg) {
               var colors = { active: '#facc15', done: '#4ade80', error: '#f87171', idle: 'rgba(255,255,255,0.15)' };
@@ -5692,6 +5855,49 @@ function getSidebarHtml() {
           document.getElementById('codeFontFamilySelect').value = '${codePrefs.fontFamily || 'Consolas'}';
           document.getElementById('codeIndentSelect').value = '${codePrefs.indentStyle || 'auto-2'}';
 
+          var _saveCodeTimer = null;
+          function saveCurrentCodeOptions() {
+            clearTimeout(_saveCodeTimer);
+            _saveCodeTimer = setTimeout(function() {
+              google.script.run.saveUserPreferences(getCodeOptions());
+            }, 300);
+          }
+
+          function syncColorFromText(pickerId, hexVal) {
+            var picker = document.getElementById(pickerId);
+            var clean = (hexVal || '').trim();
+            if (!clean.startsWith('#')) clean = '#' + clean;
+            if (/^#[0-9a-fA-F]{6}$/.test(clean)) {
+              if (picker) picker.value = clean;
+              setCodeCustomMode();
+            }
+          }
+
+          function syncTextFromColor(textId, hexVal) {
+            var textBox = document.getElementById(textId);
+            if (textBox) textBox.value = (hexVal || '').toUpperCase();
+            setCodeCustomMode();
+          }
+
+          function syncAllHexInputs() {
+            var pairs = [
+              ['cBgColor', 'cBgColorText'],
+              ['cTextColor', 'cTextColorText'],
+              ['cBorderColor', 'cBorderColorText'],
+              ['cKwColor', 'cKwColorText'],
+              ['cFnColor', 'cFnColorText'],
+              ['cTypeColor', 'cTypeColorText'],
+              ['cStrColor', 'cStrColorText'],
+              ['cComColor', 'cComColorText'],
+              ['cNumColor', 'cNumColorText']
+            ];
+            pairs.forEach(function(p) {
+              var pick = document.getElementById(p[0]);
+              var txt = document.getElementById(p[1]);
+              if (pick && txt) txt.value = pick.value.toUpperCase();
+            });
+          }
+
           function onCodeThemeChange() {
             const val = document.getElementById('codeThemeSelect').value;
             if (val !== 'custom' && CODE_THEMES[val]) {
@@ -5706,12 +5912,15 @@ function getSidebarHtml() {
               if (document.getElementById('cFnColor')) document.getElementById('cFnColor').value = t.fn;
               if (document.getElementById('cTypeColor')) document.getElementById('cTypeColor').value = t.type;
             }
+            syncAllHexInputs();
             updateCodePreview();
+            saveCurrentCodeOptions();
           }
 
           function setCodeCustomMode() {
             document.getElementById('codeThemeSelect').value = 'custom';
             updateCodePreview();
+            saveCurrentCodeOptions();
           }
 
           function updateCodePreview() {
@@ -5738,13 +5947,15 @@ function getSidebarHtml() {
             if (pInd2) pInd2.innerHTML = indentSpaces;
 
             // Use token color pickers directly (updated by theme OR manual pick)
-            document.getElementById('pKw').style.color  = document.getElementById('cKwColor').value;
-            document.getElementById('pKw2').style.color = document.getElementById('cKwColor').value;
-            document.getElementById('pStr').style.color = document.getElementById('cStrColor').value;
-            document.getElementById('pCom').style.color = document.getElementById('cComColor').value;
-            if (document.getElementById('pFn')) {
-              document.getElementById('pFn').style.color = document.getElementById('cFnColor') ? document.getElementById('cFnColor').value : '#8250DF';
-            }
+            if (document.getElementById('pKw')) document.getElementById('pKw').style.color   = document.getElementById('cKwColor').value;
+            if (document.getElementById('pKw2')) document.getElementById('pKw2').style.color = document.getElementById('cKwColor').value;
+            if (document.getElementById('pFn')) document.getElementById('pFn').style.color   = document.getElementById('cFnColor').value;
+            if (document.getElementById('pType')) document.getElementById('pType').style.color = document.getElementById('cTypeColor').value;
+            if (document.getElementById('pNum')) document.getElementById('pNum').style.color = document.getElementById('cNumColor').value;
+            if (document.getElementById('pStr')) document.getElementById('pStr').style.color = document.getElementById('cStrColor').value;
+            if (document.getElementById('pCom')) document.getElementById('pCom').style.color = document.getElementById('cComColor').value;
+            if (document.getElementById('pArg')) document.getElementById('pArg').style.color = text;
+            if (document.getElementById('pArg2')) document.getElementById('pArg2').style.color = text;
           }
 
           function getCodeOptions() {
@@ -5990,6 +6201,10 @@ function getSidebarHtml() {
               })
               .importTemplateFromJson(json);
           }
+
+          // Initialize Hex inputs and code preview on open
+          syncAllHexInputs();
+          updateCodePreview();
 
           // Load template list on sidebar open if templates tab is active
           loadTemplateList();

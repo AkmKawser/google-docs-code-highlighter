@@ -10,6 +10,8 @@ function onOpen() {
     .createMenu('⚡ Code, Table & Typography Suite')
     .addItem('🚀 Smart Auto-Format Entire Document', 'quickSmartAutoFormatDocument')
     .addSeparator()
+    .addItem('🔍 Diagnose Smart Format (Debug)', 'quickDiagnoseSmartFormat')
+    .addSeparator()
     .addItem('Open Sidebar (Styles & Colors)', 'showSidebar')
     .addSeparator()
     .addItem('✍️ Format All Document Typography', 'quickFormatDocumentTypography')
@@ -40,6 +42,123 @@ function onOpen() {
       .addItem('🔡 Heading → Title Case', 'quickHeadingsToTitleCase')
     )
     .addToUi();
+}
+
+/**
+ * Diagnostic tool: runs each Smart Auto-Format step individually and reports
+ * exactly which step fails and the precise error message.
+ * Run this from the menu to identify the exact cause of the error.
+ */
+function quickDiagnoseSmartFormat() {
+  const ui = DocumentApp.getUi();
+  const results = [];
+  let doc, body;
+
+  // Step 0: Can we access the document at all?
+  try {
+    doc = DocumentApp.getActiveDocument();
+    body = doc.getBody();
+    results.push('✅ Step 0: Document access OK (id: ' + doc.getId().substring(0, 12) + '...)');
+  } catch(e) {
+    ui.alert('🔍 Diagnosis', '❌ Step 0 FAILED: Cannot access document.\n\nError: ' + e.message, ui.ButtonSet.OK);
+    return;
+  }
+
+  // Step 1: Bookmarks
+  try {
+    const bm = doc.getBookmarks();
+    results.push('✅ Step 1: Bookmarks OK (' + bm.length + ' found)');
+  } catch(e) {
+    results.push('❌ Step 1 FAILED (Bookmarks): ' + e.message);
+  }
+
+  // Step 2: body.getParagraphs()
+  try {
+    const paras = body.getParagraphs();
+    results.push('✅ Step 2: getParagraphs OK (' + paras.length + ' paragraphs)');
+  } catch(e) {
+    results.push('❌ Step 2 FAILED (getParagraphs): ' + e.message);
+  }
+
+  // Step 3: body.getTables()
+  try {
+    const tables = body.getTables();
+    results.push('✅ Step 3: getTables OK (' + tables.length + ' tables)');
+  } catch(e) {
+    results.push('❌ Step 3 FAILED (getTables): ' + e.message);
+  }
+
+  // Step 4: body.getNumChildren() and getChild loop
+  try {
+    const n = body.getNumChildren();
+    let paraCount = 0;
+    for (let i = 0; i < Math.min(n, 20); i++) {
+      const child = body.getChild(i);
+      if (child.getType() === DocumentApp.ElementType.PARAGRAPH) paraCount++;
+    }
+    results.push('✅ Step 4: getChild loop OK (first 20 children, ' + paraCount + ' paragraphs)');
+  } catch(e) {
+    results.push('❌ Step 4 FAILED (getChild loop): ' + e.message);
+  }
+
+  // Step 5: PropertiesService
+  try {
+    PropertiesService.getUserProperties().getProperty('test_key');
+    results.push('✅ Step 5: PropertiesService OK');
+  } catch(e) {
+    results.push('❌ Step 5 FAILED (PropertiesService): ' + e.message);
+  }
+
+  // Step 6: editAsText on first paragraph
+  try {
+    const paras = body.getParagraphs();
+    if (paras.length > 0) {
+      const textObj = paras[0].editAsText();
+      const txt = textObj.getText();
+      results.push('✅ Step 6: editAsText OK (first para: "' + txt.substring(0, 30) + '")');
+    } else {
+      results.push('ℹ️ Step 6: No paragraphs to test');
+    }
+  } catch(e) {
+    results.push('❌ Step 6 FAILED (editAsText): ' + e.message);
+  }
+
+  // Step 7: Try inserting then removing a test table
+  try {
+    const paras = body.getParagraphs();
+    const insertIdx = body.getChildIndex(paras[paras.length - 1]);
+    const testTable = body.insertTable(insertIdx);
+    testTable.removeFromParent();
+    results.push('✅ Step 7: insertTable + removeFromParent OK');
+  } catch(e) {
+    results.push('❌ Step 7 FAILED (insertTable): ' + e.message);
+  }
+
+  // Step 8: Live Test Code Highlighter
+  try {
+    const codeRes = highlightAllCodeBlocks(getUserPreferences());
+    results.push('✅ Step 8: Code Blocks OK (' + ((codeRes && codeRes.count) || 0) + ' formatted)');
+  } catch(e) {
+    results.push('❌ Step 8 FAILED (Code Blocks): ' + (e.message || e));
+  }
+
+  // Step 9: Live Test Table Formatter
+  try {
+    const tableRes = formatAllDocumentTables(getTablePreferences());
+    results.push('✅ Step 9: Tables OK (' + ((tableRes && tableRes.count) || 0) + ' formatted)');
+  } catch(e) {
+    results.push('❌ Step 9 FAILED (Tables): ' + (e.message || e));
+  }
+
+  // Step 10: Live Test Typography Formatter
+  try {
+    const typoRes = formatDocumentTypography(getTypographyPreferences());
+    results.push('✅ Step 10: Typography OK (' + ((typoRes && typoRes.count) || 0) + ' formatted)');
+  } catch(e) {
+    results.push('❌ Step 10 FAILED (Typography): ' + (e.message || e));
+  }
+
+  ui.alert('🔍 Diagnostic Results', results.join('\n'), ui.ButtonSet.OK);
 }
 
 /**
@@ -98,12 +217,11 @@ function quickUndoAllTables() {
  * Formats and centers all data tables in the document.
  * Code block tables (1x1 monospace) are centered without altering code syntax colors.
  */
-function formatAllDocumentTables(options) {
+function formatAllDocumentTables(options, preloadedBody) {
   options = options || getTablePreferences();
   saveTablePreferences(options);
 
-  const doc = DocumentApp.getActiveDocument();
-  const body = doc.getBody();
+  const body = preloadedBody || DocumentApp.getActiveDocument().getBody();
   // Snapshot table list before any DOM mutations
   const tables = body.getTables();
 
@@ -132,6 +250,11 @@ function formatAllDocumentTables(options) {
     formatSingleTable(table, options, body);
     // Note: formatSingleTable already calls ensureDoubleNewlineAfterElement internally
     formattedCount++;
+
+    // Pause every 10 tables to avoid Document service rate-limit errors
+    if (i > 0 && i % 10 === 0) {
+      Utilities.sleep(30);
+    }
   }
 
   return {
@@ -301,39 +424,64 @@ function undoSingleTableFormatting(table) {
 }
 
 /**
- * Detects whether a table is a 1x1 code block container
+ * Detects whether a table is a 1x1 code block container.
+ * Uses a cache (Map keyed by table object) so each table is only inspected once.
+ * Falls back to font-family check only on cache miss — avoids repeated
+ * editAsText()/getFontFamily() API calls in tight loops.
  */
+var _codeBlockTableCache = null; // reset per smart-format run
+
 function isCodeBlockTable(table) {
+  // Fast structural check first (no API)
   if (table.getNumRows() !== 1) return false;
   const row = table.getRow(0);
   if (row.getNumCells() !== 1) return false;
 
-  const cell = row.getCell(0);
-  const numChildren = cell.getNumChildren();
-  for (let i = 0; i < numChildren; i++) {
-    const child = cell.getChild(i);
-    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
-      const text = child.asParagraph().editAsText();
-      if (text.getText().length > 0) {
-        const font = text.getFontFamily(0);
-        if (font && (
-          font === 'Consolas' ||
-          font === 'JetBrains Mono' ||
-          font === 'Courier New' ||
-          font === 'Roboto Mono' ||
-          font === 'Inconsolata' ||
-          font === 'Source Code Pro' ||
-          font === 'Space Mono' ||
-          font === 'PT Mono' ||
-          font === 'Ubuntu Mono' ||
-          font.toLowerCase().includes('mono')
-        )) {
-          return true;
+  // Cache lookup
+  if (_codeBlockTableCache !== null) {
+    if (_codeBlockTableCache.has(table)) return _codeBlockTableCache.get(table);
+  }
+
+  // Cheap color checks before the expensive font check
+  let result = false;
+  try {
+    const cell = row.getCell(0);
+    const bg = cell.getBackgroundColor();
+    // Common code block backgrounds
+    if (bg && (bg === '#F6F8FA' || bg === '#f6f8fa' ||
+               bg === '#1E1E1E' || bg === '#1e1e1e' ||
+               bg === '#282C34' || bg === '#282c34' ||
+               bg === '#0D1117' || bg === '#0d1117' ||
+               bg === '#272822' || bg === '#272822' ||
+               bg === '#FAFAFA' || bg === '#fafafa' ||
+               bg === '#F8F8F2' || bg === '#f8f8f2')) {
+      result = true;
+    } else {
+      // Fallback: check font family of first non-empty paragraph
+      const numChildren = cell.getNumChildren();
+      for (let i = 0; i < numChildren && !result; i++) {
+        const child = cell.getChild(i);
+        if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+          const text = child.asParagraph().editAsText();
+          if (text.getText().length > 0) {
+            const font = text.getFontFamily(0);
+            if (font && (
+              font === 'Consolas' || font === 'JetBrains Mono' ||
+              font === 'Courier New' || font === 'Roboto Mono' ||
+              font === 'Inconsolata' || font === 'Source Code Pro' ||
+              font === 'Space Mono' || font === 'PT Mono' ||
+              font === 'Ubuntu Mono' || font.toLowerCase().includes('mono')
+            )) {
+              result = true;
+            }
+          }
         }
       }
     }
-  }
-  return false;
+  } catch(e) {}
+
+  if (_codeBlockTableCache !== null) _codeBlockTableCache.set(table, result);
+  return result;
 }
 
 /**
@@ -391,6 +539,7 @@ function isHeadingBannerTable(table) {
  */
 function ensureDoubleNewlineAfterElement(body, element) {
   try {
+    if (!body || !element) return;
     const idx = body.getChildIndex(element);
     if (idx < 0) return;
 
@@ -401,7 +550,7 @@ function ensureDoubleNewlineAfterElement(body, element) {
     // Count consecutive empty paragraphs right after the element
     while (scanIdx < total) {
       const sibling = body.getChild(scanIdx);
-      if (sibling.getType() === DocumentApp.ElementType.PARAGRAPH &&
+      if (sibling && sibling.getType() === DocumentApp.ElementType.PARAGRAPH &&
           sibling.asParagraph().getText().trim() === '') {
         blankCount++;
         scanIdx++;
@@ -410,18 +559,27 @@ function ensureDoubleNewlineAfterElement(body, element) {
       }
     }
 
-    // Add missing empty paragraphs
+    // Add missing empty paragraphs safely
     for (let add = blankCount; add < 2; add++) {
-      const newPara = body.insertParagraph(idx + 1 + blankCount + (add - blankCount), '');
-      newPara.setFontFamily('Arial');
-      newPara.setFontSize(11);
+      const insertAt = idx + 1 + add;
+      let newPara;
+      if (insertAt >= body.getNumChildren()) {
+        newPara = body.appendParagraph('');
+      } else {
+        newPara = body.insertParagraph(insertAt, '');
+      }
+      try { newPara.setFontFamily('Arial'); } catch(e) {}
+      try { newPara.setFontSize(11); } catch(e) {}
       try { safeSetHeading(newPara, DocumentApp.ParagraphHeading.NORMAL); } catch(e) {}
     }
 
-    // Remove surplus empty paragraphs beyond two
+    // Remove surplus empty paragraphs beyond two safely
     if (blankCount > 2) {
       for (let rem = blankCount; rem > 2; rem--) {
-        try { body.getChild(idx + 1 + rem - 1).removeFromParent(); } catch(e) { break; }
+        const removeIdx = idx + rem;
+        if (removeIdx < body.getNumChildren()) {
+          try { body.getChild(removeIdx).removeFromParent(); } catch(e) { break; }
+        }
       }
     }
   } catch(e) {}
@@ -726,12 +884,14 @@ function quickUndoAllCodeBlocks() {
 /**
  * Core scanning & formatting function for code blocks
  */
-function highlightAllCodeBlocks(options) {
+function highlightAllCodeBlocks(options, preloadedBody) {
   options = options || getUserPreferences();
-  saveUserPreferences(options);
+  // Save prefs but don't persist the skipSyntaxHighlight flag
+  const prefsToSave = Object.assign({}, options);
+  delete prefsToSave.skipSyntaxHighlight;
+  saveUserPreferences(prefsToSave);
 
-  const doc = DocumentApp.getActiveDocument();
-  const body = doc.getBody();
+  const body = preloadedBody || DocumentApp.getActiveDocument().getBody();
   const paragraphs = body.getParagraphs();
   
   let codeGroups = [];
@@ -867,9 +1027,14 @@ function highlightAllCodeBlocks(options) {
     body.appendParagraph('');
   }
 
-  // Reverse loop (bottom-to-top) to preserve paragraph indices
+  // Reverse loop (bottom-to-top) to preserve paragraph indices.
+  // Sleep every 5 iterations — each convertParagraphsToCodeBlock does many
+  // DOM mutations (insertTable + removeFromParent) which hit the rate limit fast.
   for (let g = codeGroups.length - 1; g >= 0; g--) {
     convertParagraphsToCodeBlock(body, codeGroups[g], options);
+    if ((codeGroups.length - 1 - g) % 5 === 4) {
+      Utilities.sleep(80);
+    }
   }
 
   return { success: true, count: codeGroups.length, message: 'Formatted ' + codeGroups.length + ' code block(s)!' };
@@ -1042,7 +1207,8 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
   const firstParagraph = paragraphGroup[0];
   const insertIndex = body.getChildIndex(firstParagraph);
 
-  const table = body.insertTable(insertIndex);
+  // Initialize table with a 1x1 grid so column 0 exists before setting width
+  const table = body.insertTable(insertIndex, [['']]);
   table.setBorderWidth(1);
   table.setBorderColor(options.borderColor || '#D0D7DE');
   
@@ -1054,7 +1220,7 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
     table.setColumnWidth(0, Math.max(100, pageWidth - marginLeft - marginRight));
   } catch(e) {}
 
-  const cell = table.appendTableRow().appendTableCell();
+  const cell = table.getRow(0).getCell(0);
   cell.setBackgroundColor(options.bgColor || '#F6F8FA');
   cell.setPaddingTop(8);
   cell.setPaddingBottom(8);
@@ -1096,14 +1262,23 @@ function convertParagraphsToCodeBlock(body, paragraphGroup, options) {
     line.setSpacingBefore(0);
     line.setSpacingAfter(0);
     line.setForegroundColor(textColor);
-    
+
     const textObj = line.editAsText();
     if (textObj.getText().length > 0) {
       textObj.setBold(false);
       try { textObj.setBold(0, textObj.getText().length - 1, false); } catch(e) {}
     }
-    
-    applySyntaxHighlight(textObj, options);
+
+    // Skip per-token syntax highlighting during Smart Auto-Format to avoid
+    // hitting Document service rate limits (each token = 1 API call).
+    if (!options.skipSyntaxHighlight) {
+      applySyntaxHighlight(textObj, options);
+    }
+
+    // Pause every 10 lines to let Document service rate-limit quota recover
+    if (idx > 0 && idx % 10 === 0) {
+      Utilities.sleep(50);
+    }
   });
 
   paragraphGroup.forEach(p => {
@@ -1709,52 +1884,27 @@ function smartAutoFormatEntireDocument(codeOptions, tableOptions, typoOptions) {
   tableOptions = tableOptions || getTablePreferences();
   typoOptions = typoOptions || getTypographyPreferences();
 
-  // 1. Remove all bookmarks from the document
-  try {
-    removeAllBookmarks();
-  } catch(e) {
-    Logger.log('removeAllBookmarks error: ' + e);
-  }
+  _codeBlockTableCache = new Map();
 
-  // 2. Format code blocks first (extracts them into table containers so typography ignores them)
-  let codeResult = null;
-  try {
-    codeResult = highlightAllCodeBlocks(codeOptions);
-  } catch(e) {
-    Logger.log('highlightAllCodeBlocks error: ' + e);
-  }
+  try { removeAllBookmarks(); } catch(e) {}
 
-  // 3. Format and center all data tables (code block tables are centered without losing syntax styles)
-  let tableResult = null;
-  try {
-    tableResult = formatAllDocumentTables(tableOptions);
-  } catch(e) {
-    Logger.log('formatAllDocumentTables error: ' + e);
-  }
-
-  // 4. Auto-detect and format all typography (Title, H1, Subheadings, Body, inline code)
-  let typoResult = null;
-  try {
-    typoResult = formatDocumentTypography(typoOptions);
-  } catch(e) {
-    Logger.log('formatDocumentTypography error: ' + e);
-  }
+  const codeResult = highlightAllCodeBlocks(codeOptions);
+  const tableResult = formatAllDocumentTables(tableOptions);
+  const typoResult = formatDocumentTypography(typoOptions);
 
   const summary = [];
   if (codeResult && codeResult.count > 0) summary.push(codeResult.count + ' code block(s) formatted');
   if (tableResult && tableResult.count > 0) summary.push(tableResult.count + ' table(s) aligned & styled');
   if (typoResult && typoResult.count > 0) summary.push(typoResult.message || 'Typography formatted');
 
-  const message = summary.length > 0
-    ? '🚀 Smart Auto-Format Complete!\n\n• ' + summary.join('\n• ')
-    : 'Document scanned. All elements are formatted!';
-
   return {
     success: true,
     codeResult: codeResult,
     tableResult: tableResult,
     typoResult: typoResult,
-    message: message
+    message: summary.length > 0
+      ? '🚀 Smart Auto-Format Complete!\n\n• ' + summary.join('\n• ')
+      : 'Document scanned. All elements are formatted!'
   };
 }
 
@@ -1762,9 +1912,9 @@ function smartAutoFormatEntireDocument(codeOptions, tableOptions, typoOptions) {
  * Removes all bookmark annotations from the active document.
  * Bookmarks in Google Docs are named anchors shown as blue flags in the margin.
  */
-function removeAllBookmarks() {
+function removeAllBookmarks(preloadedDoc) {
   try {
-    const doc = DocumentApp.getActiveDocument();
+    const doc = preloadedDoc || DocumentApp.getActiveDocument();
     const bookmarks = doc.getBookmarks();
     for (let i = 0; i < bookmarks.length; i++) {
       try { bookmarks[i].remove(); } catch(e) {}
@@ -2425,13 +2575,15 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // --- TYPOGRAPHY CHECKS (expensive API calls — only for short paragraphs in early document positions) ---
-  // Only call editAsText/isBold/getFontSize/getAlignment when the paragraph could plausibly be a
-  // heading based on its position and length. Skip for long body text to avoid API quota errors.
-  const isPotentialHeading = text.length <= 130 && !isNarrativeSentence && !isMetadataLine;
-  const isEarlyInDocument = state.nonEmptyCount <= 10 || !state.hasTitle;
+  // --- TYPOGRAPHY CHECKS (expensive API calls) ---
+  // These calls (editAsText, isBold, getFontSize, getAlignment) each cost a
+  // round-trip to the Document service. On large documents this causes
+  // "Service Documents failed" errors. Only run them for the very first
+  // non-empty paragraphs where a title/heading heuristic is actually useful.
+  // Everything else is classified by text pattern alone (free, no API call).
+  const isPotentialHeading = state.nonEmptyCount <= 10 && text.length <= 130 && !isNarrativeSentence && !isMetadataLine;
 
-  if (isPotentialHeading && isEarlyInDocument) {
+  if (isPotentialHeading) {
     let isEntirelyBold = false;
     let maxFontSize = 0;
     let alignment = null;
@@ -2507,12 +2659,11 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
  * Formats all headings and optionally body text according to typography options,
  * with intelligent full-document structure and role auto-detection.
  */
-function formatDocumentTypography(options) {
+function formatDocumentTypography(options, preloadedBody) {
   options = options || getTypographyPreferences();
   saveTypographyPreferences(options);
 
-  const doc = DocumentApp.getActiveDocument();
-  const body = doc.getBody();
+  const body = preloadedBody || DocumentApp.getActiveDocument().getBody();
 
   // 1. Unroll any existing heading banner tables so headings are standard body paragraphs
   try {
@@ -2821,13 +2972,12 @@ function wrapParagraphInBanner(body, p, bgColor) {
     const headingType = p.getHeading();
     const text = p.getText();
 
-    // In Google Apps Script, body.insertTable(childIndex) creates a table at childIndex
-    const table = body.insertTable(childIndex);
+    // Initialize 1x1 table grid so column 0 exists before setting width
+    const table = body.insertTable(childIndex, [['']]);
     table.setBorderWidth(0);
     try { table.setBorderColor(bgColor); } catch(e) {}
 
-    const row = table.appendTableRow();
-    const cell = row.appendTableCell();
+    const cell = table.getRow(0).getCell(0);
     cell.setBackgroundColor(bgColor);
     cell.setPaddingTop(8);
     cell.setPaddingBottom(8);
@@ -2868,6 +3018,7 @@ function applyHeadingStyles(para, config, inlineBgColor) {
     if (config.alignment === 'RIGHT') align = DocumentApp.HorizontalAlignment.RIGHT;
     if (config.alignment === 'JUSTIFY') align = DocumentApp.HorizontalAlignment.JUSTIFY;
     try { para.setAlignment(align); } catch(e) {}
+    try { para.setLineSpacing(1.15); } catch(e) {}
 
     const fontSize = Number(config.fontSize) || 16;
     const fontFamily = config.fontFamily || 'Arial';
@@ -2876,28 +3027,21 @@ function applyHeadingStyles(para, config, inlineBgColor) {
 
     try { para.setFontFamily(fontFamily); } catch(e) {}
     try { para.setFontSize(fontSize); } catch(e) {}
-    try { para.setLineSpacing(1.15); } catch(e) {}
 
     let textObj = null;
     try { textObj = para.editAsText(); } catch(e) {}
     if (textObj) {
-      const textLen = textObj.getText().length;
-      if (textLen > 0) {
-        try { textObj.setFontFamily(0, textLen - 1, fontFamily); } catch(e) {
-          try { textObj.setFontFamily(fontFamily); } catch(e2) {}
+      try { textObj.setFontFamily(fontFamily); } catch(e) {}
+      try { textObj.setFontSize(fontSize); } catch(e) {}
+      try { textObj.setBold(bold); } catch(e) {}
+      try { textObj.setForegroundColor(textColor); } catch(e) {}
+      if (inlineBgColor) {
+        const textLen = textObj.getText().length;
+        if (textLen > 0) {
+          try { textObj.setBackgroundColor(0, textLen - 1, inlineBgColor); } catch(e) {}
         }
-        try { textObj.setFontSize(0, textLen - 1, fontSize); } catch(e) {
-          try { textObj.setFontSize(fontSize); } catch(e2) {}
-        }
-        try { textObj.setBold(0, textLen - 1, bold); } catch(e) {
-          try { textObj.setBold(bold); } catch(e2) {}
-        }
-        try { textObj.setForegroundColor(0, textLen - 1, textColor); } catch(e) {
-          try { textObj.setForegroundColor(textColor); } catch(e2) {}
-        }
-        try { textObj.setBackgroundColor(0, textLen - 1, inlineBgColor || null); } catch(e) {
-          try { textObj.setBackgroundColor(inlineBgColor || null); } catch(e2) {}
-        }
+      } else {
+        try { textObj.setBackgroundColor(null); } catch(e) {}
       }
     }
   } catch(outerErr) {
@@ -2916,6 +3060,7 @@ function formatSingleBodyParagraph(para, config) {
     if (config.alignment === 'RIGHT') align = DocumentApp.HorizontalAlignment.RIGHT;
     if (config.alignment === 'JUSTIFY') align = DocumentApp.HorizontalAlignment.JUSTIFY;
     try { para.setAlignment(align); } catch(e) {}
+    try { para.setLineSpacing(1.15); } catch(e) {}
 
     const fontSize = Number(config.fontSize) || 11;
     const fontFamily = config.fontFamily || 'Arial';
@@ -2923,32 +3068,17 @@ function formatSingleBodyParagraph(para, config) {
 
     try { para.setFontFamily(fontFamily); } catch(e) {}
     try { para.setFontSize(fontSize); } catch(e) {}
-    try { para.setLineSpacing(1.15); } catch(e) {}
 
     let textObj = null;
     try { textObj = para.editAsText(); } catch(e) {}
     if (textObj) {
-      const textLen = textObj.getText().length;
-      if (textLen > 0) {
-        try { textObj.setFontFamily(0, textLen - 1, fontFamily); } catch(e) {
-          try { textObj.setFontFamily(fontFamily); } catch(e2) {}
-        }
-        try { textObj.setFontSize(0, textLen - 1, fontSize); } catch(e) {
-          try { textObj.setFontSize(fontSize); } catch(e2) {}
-        }
-        try { textObj.setBold(0, textLen - 1, false); } catch(e) {
-          try { textObj.setBold(false); } catch(e2) {}
-        }
-        try { textObj.setForegroundColor(0, textLen - 1, textColor); } catch(e) {
-          try { textObj.setForegroundColor(textColor); } catch(e2) {}
-        }
-        try { textObj.setBackgroundColor(0, textLen - 1, null); } catch(e) {
-          try { textObj.setBackgroundColor(null); } catch(e2) {}
-        }
+      try { textObj.setFontFamily(fontFamily); } catch(e) {}
+      try { textObj.setFontSize(fontSize); } catch(e) {}
+      try { textObj.setForegroundColor(textColor); } catch(e) {}
+      try { textObj.setBackgroundColor(null); } catch(e) {}
 
-        // Automatically detect and highlight inline code tokens (`code`)
-        try { applyInlineBodyCodeHighlight(textObj); } catch(e) {}
-      }
+      // Automatically detect and highlight inline code tokens (`code`)
+      try { applyInlineBodyCodeHighlight(textObj); } catch(e) {}
     }
   } catch(outerErr) {
     Logger.log('formatSingleBodyParagraph error: ' + outerErr);

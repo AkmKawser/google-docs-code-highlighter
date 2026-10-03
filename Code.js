@@ -2015,23 +2015,21 @@ function quickSmartAutoFormatDocument() {
 
 /**
  * Backend function called phase-by-phase from the sidebar.
+ * Reads its own saved preferences — no need to pass options over the RPC wire.
  * @param {string} phase  One of: 'bookmarks+code', 'tables', 'typography'
- * @param {object} codeOptions
- * @param {object} tableOptions
- * @param {object} typoOptions
  */
-function smartAutoFormatPhase(phase, codeOptions, tableOptions, typoOptions) {
+function smartAutoFormatPhase(phase) {
   if (phase === 'bookmarks+code') {
     try { removeAllBookmarks(); } catch(e) {}
-    const r = highlightAllCodeBlocks(codeOptions || getUserPreferences());
+    const r = highlightAllCodeBlocks(getUserPreferences());
     return { success: true, phase: phase, message: r ? r.message : 'Code done', count: r ? r.count : 0 };
   }
   if (phase === 'tables') {
-    const r = formatAllDocumentTables(tableOptions || getTablePreferences());
+    const r = formatAllDocumentTables(getTablePreferences());
     return { success: true, phase: phase, message: r ? r.message : 'Tables done', count: r ? r.count : 0 };
   }
   if (phase === 'typography') {
-    const r = formatDocumentTypography(typoOptions || getTypographyPreferences());
+    const r = formatDocumentTypography(getTypographyPreferences());
     return { success: true, phase: phase, message: r ? r.message : 'Typography done', count: r ? r.count : 0 };
   }
   return { success: false, phase: phase, message: 'Unknown phase: ' + phase };
@@ -3956,7 +3954,7 @@ function getSidebarHtml() {
             <span>🚀</span> Smart Auto-Format
           </div>
           <div style="font-size: 11px; opacity: 0.9; margin-bottom: 8px; text-align:center;">
-            Runs in 3 safe phases — no quota crashes
+            Runs in 3 safe phases &mdash; no quota crashes
           </div>
           <!-- Phase progress indicators -->
           <div id="phaseIndicators" style="display:none; margin-bottom:8px;">
@@ -5274,8 +5272,8 @@ function getSidebarHtml() {
 
           // -------------------------------------------------------
           // Phased Smart Auto-Format
-          // Runs 3 separate server calls (Code → Tables → Typography)
-          // with a 1.5 s gap between each to avoid burst rate-limit.
+          // Runs 3 separate server calls: Code -> Tables -> Typography
+          // Server reads its own saved prefs (no large objects passed over RPC).
           // -------------------------------------------------------
           function runSmartAutoFormat() {
             const statusEl = document.getElementById('smartAutoStatus');
@@ -5285,21 +5283,16 @@ function getSidebarHtml() {
             const p2 = document.getElementById('phaseTag2');
             const p3 = document.getElementById('phaseTag3');
 
-            const codeOpts  = getCodeOptions();
-            const tableOpts = getTableOptions();
-            const typoOpts  = getTypographyOptions();
-
             if (btn) btn.disabled = true;
             if (indicators) indicators.style.display = 'block';
             if (statusEl) { statusEl.style.display = 'block'; statusEl.innerText = ''; }
 
             function setPhase(tag, state, msg) {
-              // state: 'active' | 'done' | 'error' | 'idle'
-              const colors = { active: '#facc15', done: '#4ade80', error: '#f87171', idle: 'rgba(255,255,255,0.15)' };
-              const textColors = { active: '#1e293b', done: '#052e16', error: '#450a0a', idle: '#fff' };
+              var colors = { active: '#facc15', done: '#4ade80', error: '#f87171', idle: 'rgba(255,255,255,0.15)' };
+              var txtColors = { active: '#1e293b', done: '#052e16', error: '#450a0a', idle: '#fff' };
               if (!tag) return;
               tag.style.background = colors[state] || colors.idle;
-              tag.style.color = textColors[state] || '#fff';
+              tag.style.color = txtColors[state] || '#fff';
               if (msg) tag.title = msg;
             }
 
@@ -5307,59 +5300,59 @@ function getSidebarHtml() {
               if (statusEl) statusEl.innerText += (statusEl.innerText ? '\n' : '') + line;
             }
 
-            // Reset phase indicators
+            // Reset all indicators to idle
             setPhase(p1, 'idle'); setPhase(p2, 'idle'); setPhase(p3, 'idle');
 
-            // --- Phase 1: Bookmarks + Code ---
+            // Phase 1: Bookmarks + Code
             setPhase(p1, 'active');
-            appendStatus('⏳ Phase 1/3: Formatting code blocks…');
+            appendStatus('Phase 1/3: Formatting code blocks...');
             google.script.run
               .withSuccessHandler(function(r1) {
-                setPhase(p1, r1.success ? 'done' : 'error', r1.message);
-                appendStatus('✅ Phase 1: ' + r1.message);
+                setPhase(p1, r1 && r1.success ? 'done' : 'error', r1 ? r1.message : '');
+                appendStatus('Phase 1 done: ' + (r1 ? r1.message : 'ok'));
 
-                // --- Phase 2: Tables (after 1.5 s) ---
+                // Phase 2: Tables after 1.5s
                 setPhase(p2, 'active');
-                appendStatus('⏳ Phase 2/3: Formatting tables…');
+                appendStatus('Phase 2/3: Formatting tables...');
                 setTimeout(function() {
                   google.script.run
                     .withSuccessHandler(function(r2) {
-                      setPhase(p2, r2.success ? 'done' : 'error', r2.message);
-                      appendStatus('✅ Phase 2: ' + r2.message);
+                      setPhase(p2, r2 && r2.success ? 'done' : 'error', r2 ? r2.message : '');
+                      appendStatus('Phase 2 done: ' + (r2 ? r2.message : 'ok'));
 
-                      // --- Phase 3: Typography (after another 1.5 s) ---
+                      // Phase 3: Typography after 1.5s
                       setPhase(p3, 'active');
-                      appendStatus('⏳ Phase 3/3: Formatting typography…');
+                      appendStatus('Phase 3/3: Formatting typography...');
                       setTimeout(function() {
                         google.script.run
                           .withSuccessHandler(function(r3) {
-                            setPhase(p3, r3.success ? 'done' : 'error', r3.message);
-                            appendStatus('✅ Phase 3: ' + r3.message);
-                            appendStatus('\n🚀 All phases complete!');
+                            setPhase(p3, r3 && r3.success ? 'done' : 'error', r3 ? r3.message : '');
+                            appendStatus('Phase 3 done: ' + (r3 ? r3.message : 'ok'));
+                            appendStatus('All phases complete!');
                             if (btn) btn.disabled = false;
                           })
                           .withFailureHandler(function(err) {
                             setPhase(p3, 'error');
-                            appendStatus('❌ Phase 3 error: ' + err);
+                            appendStatus('Phase 3 error: ' + err);
                             if (btn) btn.disabled = false;
                           })
-                          .smartAutoFormatPhase('typography', codeOpts, tableOpts, typoOpts);
+                          .smartAutoFormatPhase('typography');
                       }, 1500);
                     })
                     .withFailureHandler(function(err) {
                       setPhase(p2, 'error');
-                      appendStatus('❌ Phase 2 error: ' + err);
+                      appendStatus('Phase 2 error: ' + err);
                       if (btn) btn.disabled = false;
                     })
-                    .smartAutoFormatPhase('tables', codeOpts, tableOpts, typoOpts);
+                    .smartAutoFormatPhase('tables');
                 }, 1500);
               })
               .withFailureHandler(function(err) {
                 setPhase(p1, 'error');
-                appendStatus('❌ Phase 1 error: ' + err);
+                appendStatus('Phase 1 error: ' + err);
                 if (btn) btn.disabled = false;
               })
-              .smartAutoFormatPhase('bookmarks+code', codeOpts, tableOpts, typoOpts);
+              .smartAutoFormatPhase('bookmarks+code');
           }
 
           function runRemoveBookmarks() {

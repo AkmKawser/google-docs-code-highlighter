@@ -1,6 +1,6 @@
 # ⚡ Google Docs Code, Table & Typography Suite
 
-> A smart Google Apps Script suite that formats document typography (Title, Heading 1, Sub-headings, Body), highlights code blocks with rich token syntax and professional spacing normalization, and styles data tables with professional themes & zebra striping — featuring an interactive 3-tab sidebar and zero markdown backticks required.
+> A smart Google Apps Script suite that formats document typography (Title, Heading 1, Sub-headings, Body), highlights code blocks with rich token syntax and professional spacing normalization, styles data tables with professional themes & zebra striping, and lets you **save, export & import your full formatting setup across documents** — featuring an interactive **5-tab sidebar** and zero markdown backticks required.
 
 ![Google Apps Script](https://img.shields.io/badge/Google%20Apps%20Script-4285F4?style=for-the-badge&logo=google&logoColor=white)
 ![Google Docs](https://img.shields.io/badge/Google%20Docs-0F9D58?style=for-the-badge&logo=googledocs&logoColor=white)
@@ -173,6 +173,16 @@ Use **`⚡ Code, Table & Typography Suite`** > **`🔍 Diagnose Smart Format (De
 
 ---
 
+### 📦 Formatting Templates — Save, Export & Reuse Your Setup
+- **💾 Save Named Templates**: Capture your entire current formatting setup (Code theme + colors, Table theme + colors, Typography fonts + sizes + banners) as a single named template stored securely in your Google account (`PropertiesService`).
+- **📂 Load Saved Templates**: Instantly restore any saved template — all three preference sets (Code, Table, Typography) are applied in one click.
+- **🗑️ Delete Templates**: Remove templates you no longer need directly from the sidebar.
+- **📤 Export Template as JSON**: Export any saved template as a clean, portable JSON snippet. Copy it once and use it forever.
+- **📥 Import Template from JSON**: Paste a previously exported JSON snippet into any new Google Doc to instantly replicate your full formatting setup — no manual reconfiguration needed.
+- **Available from two places**:
+  - **Sidebar → 📦 Templates tab**: Full GUI with save, load, delete, export, and import in one panel.
+  - **Menu → 📦 Formatting Templates submenu**: Quick access to all four actions from the toolbar menu.
+
 ## 🚀 Quick Setup Guide
 
 ### Method 1: Manual Copy & Paste (Recommended)
@@ -207,12 +217,14 @@ clasp push
   - **Data Tables**: Centers data tables across margins with colorful headers and zebra striping.
   - **Typography**: Auto-detects and styles Document Title, Headings, Sub-headings, Body text, and inline code highlights.
 
-### 2. Open the Interactive 3-Tab Sidebar
+### 2. Open the Interactive 5-Tab Sidebar
 - Click **⚡ Code, Table & Typography Suite** > **Open Sidebar (Styles & Colors)**.
-- Switch between **✍️ Typography**, **📊 Tables**, and **⚡ Code** tabs:
+- Switch between **✍️ Typography**, **📊 Tables**, **⚡ Code**, **✨ Cleanup**, and **📦 Templates** tabs:
   - **Typography Tab**: Select a preset or customize title/heading/subheading colors, fonts, sizes, and banner styles with a live document preview.
   - **Tables Tab**: Choose your table color theme, cell alignment, and padding with a real-time live preview.
   - **Code Tab**: Pick syntax themes (GitHub Light, One Dark Pro, Dracula, Monokai, Solarized Light), configure token colors for Keywords, Functions, Types, Strings, Comments, Numbers, and adjust auto-indentation.
+  - **Cleanup Tab**: Run text cleanup, paragraph spacing normalization, inline markdown, heading numbering, and list conversion.
+  - **Templates Tab**: Save, load, export, and import full formatting templates (see step 6 below).
 
 ### 3. Format & Indent Code Blocks
 - Click **⚡ Code, Table & Typography Suite** > **⚡ Highlight All Code (Quick Run)**, or select code and click **Highlight Selected Code**.
@@ -226,6 +238,26 @@ clasp push
 - Click **↩ Undo Document Text Formatting** to revert titles, headings, and body paragraphs back to clean Google Docs defaults.
 - Click **↩ Undo All Tables Formatting** to reset tables to standard document defaults.
 - Click **↩ Undo All Code Blocks Formatting** to convert 1x1 code block containers back to normal paragraphs.
+
+### 6. 📦 Save & Export Your Formatting Template
+
+Use the **📦 Templates** sidebar tab (or the menu **📦 Formatting Templates** submenu) to save and transfer your complete setup:
+
+#### Saving a Template
+1. Configure your Code, Table & Typography settings to your liking in the sidebar.
+2. Switch to the **📦 Templates** tab.
+3. Type a name (e.g. `Client A Dark Theme`) and click **💾 Save Template**.
+4. Your full setup is saved to your Google account and available in any document that has the script installed.
+
+#### Transferring Your Setup to a New Google Doc
+1. In your original document's sidebar → **📦 Templates** tab → select your template from the **Export** dropdown.
+2. Click **📤 Export JSON** — a JSON text box appears.
+3. Click inside the box and press **`Ctrl + A`** then **`Ctrl + C`** to copy the JSON.
+4. Open your **new Google Doc** → install the script → open the sidebar.
+5. Go to the **📦 Templates** tab → paste the JSON into the **Import** area.
+6. Click **📥 Import & Apply Template** — all your Code, Table & Typography settings are instantly restored! ✅
+
+> **Tip**: You can also use the menu shortcuts: **⚡ Code, Table & Typography Suite** → **📦 Formatting Templates** → **📤 Export Template as JSON** or **📥 Import Template from JSON**.
 
 ---
 

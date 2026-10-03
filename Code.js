@@ -41,6 +41,13 @@ function onOpen() {
       .addItem('🔡 Heading → UPPERCASE', 'quickHeadingsToUpperCase')
       .addItem('🔡 Heading → Title Case', 'quickHeadingsToTitleCase')
     )
+    .addSeparator()
+    .addSubMenu(DocumentApp.getUi().createMenu('📦 Formatting Templates')
+      .addItem('💾 Save Current Settings as Template…', 'quickSaveTemplate')
+      .addItem('📂 Load a Saved Template…', 'quickLoadTemplate')
+      .addItem('📤 Export Template as JSON…', 'quickExportTemplate')
+      .addItem('📥 Import Template from JSON…', 'quickImportTemplate')
+    )
     .addToUi();
 }
 
@@ -3297,6 +3304,216 @@ function saveTypographyPreferences(options) {
 }
 
 /* ==========================================================================
+   FORMATTING TEMPLATES — SAVE / LOAD / EXPORT / IMPORT
+   ========================================================================== */
+
+/** Key prefix used to store named templates in UserProperties */
+var TEMPLATE_LIST_KEY = 'FORMATTING_TEMPLATE_LIST';
+var TEMPLATE_DATA_PREFIX = 'FMT_TPL_';
+
+/**
+ * Returns the list of saved template names (array of strings).
+ */
+function getTemplateNames() {
+  try {
+    const raw = PropertiesService.getUserProperties().getProperty(TEMPLATE_LIST_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
+/**
+ * Saves the given template names list back to UserProperties.
+ */
+function saveTemplateNames(names) {
+  PropertiesService.getUserProperties().setProperty(TEMPLATE_LIST_KEY, JSON.stringify(names));
+}
+
+/**
+ * Saves the current code + table + typography settings as a named template.
+ * @param {string} name  Template name.
+ * @returns {{ success: boolean, message: string }}
+ */
+function saveNamedTemplate(name) {
+  name = (name || '').trim();
+  if (!name) return { success: false, message: 'Template name cannot be empty.' };
+  if (name.length > 60) return { success: false, message: 'Template name must be 60 characters or fewer.' };
+
+  const template = {
+    name: name,
+    savedAt: new Date().toISOString(),
+    code: getUserPreferences(),
+    table: getTablePreferences(),
+    typography: getTypographyPreferences()
+  };
+
+  try {
+    const key = TEMPLATE_DATA_PREFIX + name;
+    PropertiesService.getUserProperties().setProperty(key, JSON.stringify(template));
+    const names = getTemplateNames();
+    if (names.indexOf(name) === -1) {
+      names.push(name);
+      saveTemplateNames(names);
+    }
+    return { success: true, message: '✅ Template "' + name + '" saved successfully!' };
+  } catch(e) {
+    return { success: false, message: '❌ Failed to save template: ' + e.message };
+  }
+}
+
+/**
+ * Loads a named template and applies it as the active preferences.
+ * @param {string} name  Template name.
+ * @returns {{ success: boolean, message: string, template: object|null }}
+ */
+function loadNamedTemplate(name) {
+  try {
+    const key = TEMPLATE_DATA_PREFIX + name;
+    const raw = PropertiesService.getUserProperties().getProperty(key);
+    if (!raw) return { success: false, message: '❌ Template "' + name + '" not found.', template: null };
+    const tpl = JSON.parse(raw);
+    if (tpl.code)       saveUserPreferences(tpl.code);
+    if (tpl.table)      saveTablePreferences(tpl.table);
+    if (tpl.typography) saveTypographyPreferences(tpl.typography);
+    return { success: true, message: '✅ Template "' + name + '" loaded! Your settings have been updated.', template: tpl };
+  } catch(e) {
+    return { success: false, message: '❌ Error loading template: ' + e.message, template: null };
+  }
+}
+
+/**
+ * Deletes a named template from UserProperties.
+ * @param {string} name  Template name.
+ * @returns {{ success: boolean, message: string }}
+ */
+function deleteNamedTemplate(name) {
+  try {
+    const key = TEMPLATE_DATA_PREFIX + name;
+    PropertiesService.getUserProperties().deleteProperty(key);
+    const names = getTemplateNames().filter(n => n !== name);
+    saveTemplateNames(names);
+    return { success: true, message: '🗑️ Template "' + name + '" deleted.' };
+  } catch(e) {
+    return { success: false, message: '❌ Error deleting template: ' + e.message };
+  }
+}
+
+/**
+ * Returns all saved template names as an array (for the sidebar).
+ */
+function getAllTemplateNames() {
+  return getTemplateNames();
+}
+
+/**
+ * Returns the full JSON export string for a named template.
+ * @param {string} name
+ * @returns {{ success: boolean, json: string, message: string }}
+ */
+function exportTemplateAsJson(name) {
+  try {
+    const key = TEMPLATE_DATA_PREFIX + name;
+    const raw = PropertiesService.getUserProperties().getProperty(key);
+    if (!raw) return { success: false, json: '', message: '❌ Template "' + name + '" not found.' };
+    // Pretty-print with 2-space indent for readability
+    const pretty = JSON.stringify(JSON.parse(raw), null, 2);
+    return { success: true, json: pretty, message: '' };
+  } catch(e) {
+    return { success: false, json: '', message: '❌ Error: ' + e.message };
+  }
+}
+
+/**
+ * Imports a template from a raw JSON string, saves it, and applies it.
+ * @param {string} jsonStr  Raw JSON exported by exportTemplateAsJson.
+ * @returns {{ success: boolean, message: string }}
+ */
+function importTemplateFromJson(jsonStr) {
+  try {
+    const tpl = JSON.parse(jsonStr);
+    if (!tpl || typeof tpl !== 'object') throw new Error('Invalid JSON structure.');
+    const name = (tpl.name || 'Imported Template').trim();
+    tpl.name = name;
+    tpl.savedAt = new Date().toISOString();
+    const key = TEMPLATE_DATA_PREFIX + name;
+    PropertiesService.getUserProperties().setProperty(key, JSON.stringify(tpl));
+    const names = getTemplateNames();
+    if (names.indexOf(name) === -1) {
+      names.push(name);
+      saveTemplateNames(names);
+    }
+    // Apply the imported settings immediately
+    if (tpl.code)       saveUserPreferences(tpl.code);
+    if (tpl.table)      saveTablePreferences(tpl.table);
+    if (tpl.typography) saveTypographyPreferences(tpl.typography);
+    return { success: true, message: '✅ Template "' + name + '" imported & applied!' };
+  } catch(e) {
+    return { success: false, message: '❌ Import failed: ' + e.message };
+  }
+}
+
+/** Quick menu action: prompt for name and save current settings */
+function quickSaveTemplate() {
+  const ui = DocumentApp.getUi();
+  const resp = ui.prompt('💾 Save Formatting Template', 'Enter a name for this template:', ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  const result = saveNamedTemplate(resp.getResponseText());
+  ui.alert('📦 Templates', result.message, ui.ButtonSet.OK);
+}
+
+/** Quick menu action: list saved templates and apply one */
+function quickLoadTemplate() {
+  const ui = DocumentApp.getUi();
+  const names = getTemplateNames();
+  if (names.length === 0) {
+    ui.alert('📦 Templates', 'No saved templates found. Use "Save Current Settings as Template" first.', ui.ButtonSet.OK);
+    return;
+  }
+  const resp = ui.prompt(
+    '📂 Load Template',
+    'Saved templates:\n' + names.map((n, i) => (i+1) + '. ' + n).join('\n') + '\n\nType the template name to load:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  const result = loadNamedTemplate(resp.getResponseText().trim());
+  ui.alert('📦 Templates', result.message, ui.ButtonSet.OK);
+}
+
+/** Quick menu action: export selected template as JSON in a dialog */
+function quickExportTemplate() {
+  const ui = DocumentApp.getUi();
+  const names = getTemplateNames();
+  if (names.length === 0) {
+    ui.alert('📦 Templates', 'No saved templates found.', ui.ButtonSet.OK);
+    return;
+  }
+  const resp = ui.prompt(
+    '📤 Export Template',
+    'Saved templates:\n' + names.map((n, i) => (i+1) + '. ' + n).join('\n') + '\n\nType the template name to export:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  const result = exportTemplateAsJson(resp.getResponseText().trim());
+  if (!result.success) {
+    ui.alert('📦 Templates', result.message, ui.ButtonSet.OK);
+    return;
+  }
+  ui.alert('📤 Exported JSON (copy this)', result.json, ui.ButtonSet.OK);
+}
+
+/** Quick menu action: paste JSON to import a template */
+function quickImportTemplate() {
+  const ui = DocumentApp.getUi();
+  const resp = ui.prompt(
+    '📥 Import Template from JSON',
+    'Paste the exported template JSON below:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  const result = importTemplateFromJson(resp.getResponseText().trim());
+  ui.alert('📦 Templates', result.message, ui.ButtonSet.OK);
+}
+
+/* ==========================================================================
    SIDEBAR UI (TABBED: 📊 TABLES & ⚡ CODE)
    ========================================================================== */
 
@@ -3634,7 +3851,7 @@ function getSidebarHtml() {
         </div>
 
         <!-- Navigation Tabs -->
-        <div class="tab-header" style="display:grid; grid-template-columns: repeat(4,1fr); gap:2px;">
+        <div class="tab-header" style="display:grid; grid-template-columns: repeat(5,1fr); gap:2px;">
           <button class="tab-btn active" id="tabBtnTypography" onclick="switchTab('typography')" style="font-size:10px; padding:5px 2px;">
             <span>✍️</span> Typo
           </button>
@@ -3645,7 +3862,10 @@ function getSidebarHtml() {
             <span>⚡</span> Code
           </button>
           <button class="tab-btn" id="tabBtnCleanup" onclick="switchTab('cleanup')" style="font-size:10px; padding:5px 2px;">
-            <span>✨</span> Cleanup
+            <span>✨</span> Clean
+          </button>
+          <button class="tab-btn" id="tabBtnTemplates" onclick="switchTab('templates')" style="font-size:10px; padding:5px 2px;">
+            <span>📦</span> Templates
           </button>
         </div>
 
@@ -4449,6 +4669,59 @@ function getSidebarHtml() {
           <div id="cleanupStatus" class="status-box"></div>
         </div>
 
+        <!-- ==========================================
+             TAB 5: 📦 FORMATTING TEMPLATES
+             ========================================== -->
+        <div id="tabContentTemplates" class="tab-content">
+
+          <!-- Save Current Settings -->
+          <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px; margin-bottom:10px;">
+            <div style="font-size:11px; font-weight:700; color:#065f46; margin-bottom:6px;">💾 Save Current Settings as Template</div>
+            <div style="font-size:11px; color:#374151; margin-bottom:8px;">Captures your current Code, Table &amp; Typography settings into a named template you can reuse in any document.</div>
+            <input type="text" id="tplNameInput" placeholder="e.g. My Dark Theme, Client A Style…" style="width:100%; margin-bottom:6px; font-size:12px; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px;">
+            <button class="btn-primary" id="btnSaveTemplate" onclick="runSaveTemplate()" style="margin-top:0;">
+              💾 Save Template
+            </button>
+          </div>
+
+          <!-- Saved Templates List -->
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:10px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+              <span style="font-size:11px; font-weight:700; color:#334155;">📂 Saved Templates</span>
+              <button onclick="loadTemplateList()" style="font-size:10px; color:#2563eb; background:none; border:none; cursor:pointer; font-weight:600;">↻ Refresh</button>
+            </div>
+            <div id="tplList" style="min-height:32px; font-size:11px; color:#6b7280;">Loading…</div>
+          </div>
+
+          <!-- Export / Import JSON -->
+          <div style="background:#fefce8; border:1px solid #fde68a; border-radius:8px; padding:10px; margin-bottom:10px;">
+            <div style="font-size:11px; font-weight:700; color:#92400e; margin-bottom:6px;">📤 Export Template as JSON</div>
+            <div style="font-size:11px; color:#374151; margin-bottom:8px;">Export any saved template as a JSON code block. Copy it and paste it into a new document to set it up instantly.</div>
+            <select id="tplExportSelect" style="width:100%; margin-bottom:6px; font-size:12px; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px;">
+              <option value="">— choose a template —</option>
+            </select>
+            <button class="btn-secondary" id="btnExportTemplate" onclick="runExportTemplate()" style="margin-top:0; border-color:#fde68a; color:#92400e;">
+              📤 Export JSON
+            </button>
+            <textarea id="tplExportArea" rows="6" readonly
+              style="display:none; width:100%; margin-top:8px; font-size:10px; font-family:monospace; padding:6px; border:1px solid #d1d5db; border-radius:6px; background:#fffbeb; resize:vertical;"
+              onclick="this.select()"></textarea>
+            <div id="tplExportCopyHint" style="display:none; font-size:10px; color:#92400e; margin-top:4px;">👆 Click the box above to select all, then Ctrl+C to copy</div>
+          </div>
+
+          <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px; margin-bottom:10px;">
+            <div style="font-size:11px; font-weight:700; color:#1e3a8a; margin-bottom:6px;">📥 Import Template from JSON</div>
+            <div style="font-size:11px; color:#374151; margin-bottom:8px;">Paste a previously exported template JSON here to import &amp; apply it in this document.</div>
+            <textarea id="tplImportArea" rows="5" placeholder="Paste exported JSON here…"
+              style="width:100%; font-size:10px; font-family:monospace; padding:6px; border:1px solid #bfdbfe; border-radius:6px; resize:vertical;"></textarea>
+            <button class="btn-primary" id="btnImportTemplate" onclick="runImportTemplate()" style="margin-top:6px;">
+              📥 Import &amp; Apply Template
+            </button>
+          </div>
+
+          <div id="tplStatus" class="status-box"></div>
+        </div>
+
         <script>
           /* Tab Switching */
           function switchTab(tab) {
@@ -4456,10 +4729,13 @@ function getSidebarHtml() {
             document.getElementById('tabBtnTables').classList.toggle('active', tab === 'tables');
             document.getElementById('tabBtnCode').classList.toggle('active', tab === 'code');
             document.getElementById('tabBtnCleanup').classList.toggle('active', tab === 'cleanup');
+            document.getElementById('tabBtnTemplates').classList.toggle('active', tab === 'templates');
             document.getElementById('tabContentTypography').classList.toggle('active', tab === 'typography');
             document.getElementById('tabContentTables').classList.toggle('active', tab === 'tables');
             document.getElementById('tabContentCode').classList.toggle('active', tab === 'code');
             document.getElementById('tabContentCleanup').classList.toggle('active', tab === 'cleanup');
+            document.getElementById('tabContentTemplates').classList.toggle('active', tab === 'templates');
+            if (tab === 'templates') loadTemplateList();
           }
 
           /* =========================================================
@@ -5390,6 +5666,146 @@ function getSidebarHtml() {
           updateTypographyPreview();
           onTableThemeChange();
           onCodeThemeChange();
+
+          /* =========================================================
+             TEMPLATES TAB LOGIC
+             ========================================================= */
+          function setTplStatus(msg, type) {
+            const el = document.getElementById('tplStatus');
+            if (!el) return;
+            el.className = 'status-box ' + type;
+            el.innerText = msg;
+          }
+
+          function loadTemplateList() {
+            const listEl = document.getElementById('tplList');
+            const exportSel = document.getElementById('tplExportSelect');
+            listEl.innerHTML = '<span style="color:#9ca3af">Loading…</span>';
+            google.script.run
+              .withSuccessHandler(function(names) {
+                // Rebuild saved-template list
+                if (!names || names.length === 0) {
+                  listEl.innerHTML = '<span style="color:#9ca3af">No saved templates yet.</span>';
+                } else {
+                  listEl.innerHTML = names.map(function(n) {
+                    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #e5e7eb;">' +
+                      '<span style="font-size:11px;font-weight:600;color:#1e3a8a;">📦 ' + escHtml(n) + '</span>' +
+                      '<div style="display:flex;gap:4px;">' +
+                        '<button onclick="runLoadTemplate(\'' + escHtml(n) + '\')" ' +
+                          'style="font-size:10px;padding:2px 7px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;">Load</button>' +
+                        '<button onclick="runDeleteTemplate(\'' + escHtml(n) + '\')" ' +
+                          'style="font-size:10px;padding:2px 7px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:4px;cursor:pointer;">✕</button>' +
+                      '</div>' +
+                    '</div>';
+                  }).join('');
+                }
+                // Rebuild export dropdown
+                exportSel.innerHTML = '<option value="">— choose a template —</option>' +
+                  (names || []).map(function(n) {
+                    return '<option value="' + escHtml(n) + '">' + escHtml(n) + '</option>';
+                  }).join('');
+              })
+              .withFailureHandler(function(err) {
+                listEl.innerHTML = '<span style="color:#b91c1c">Error: ' + err + '</span>';
+              })
+              .getAllTemplateNames();
+          }
+
+          function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+          }
+
+          function runSaveTemplate() {
+            const name = (document.getElementById('tplNameInput').value || '').trim();
+            if (!name) { setTplStatus('Please enter a template name.', 'error'); return; }
+            setTplStatus('Saving template…', 'loading');
+            document.getElementById('btnSaveTemplate').disabled = true;
+            google.script.run
+              .withSuccessHandler(function(res) {
+                document.getElementById('btnSaveTemplate').disabled = false;
+                setTplStatus(res.message, res.success ? 'success' : 'error');
+                if (res.success) { document.getElementById('tplNameInput').value = ''; loadTemplateList(); }
+              })
+              .withFailureHandler(function(err) {
+                document.getElementById('btnSaveTemplate').disabled = false;
+                setTplStatus('Error: ' + err, 'error');
+              })
+              .saveNamedTemplate(name);
+          }
+
+          function runLoadTemplate(name) {
+            setTplStatus('Loading template "' + name + '"…', 'loading');
+            google.script.run
+              .withSuccessHandler(function(res) {
+                setTplStatus(res.message, res.success ? 'success' : 'error');
+              })
+              .withFailureHandler(function(err) {
+                setTplStatus('Error: ' + err, 'error');
+              })
+              .loadNamedTemplate(name);
+          }
+
+          function runDeleteTemplate(name) {
+            if (!confirm('Delete template "' + name + '"? This cannot be undone.')) return;
+            setTplStatus('Deleting…', 'loading');
+            google.script.run
+              .withSuccessHandler(function(res) {
+                setTplStatus(res.message, res.success ? 'success' : 'error');
+                loadTemplateList();
+              })
+              .withFailureHandler(function(err) {
+                setTplStatus('Error: ' + err, 'error');
+              })
+              .deleteNamedTemplate(name);
+          }
+
+          function runExportTemplate() {
+            const name = document.getElementById('tplExportSelect').value;
+            if (!name) { setTplStatus('Please choose a template to export.', 'error'); return; }
+            setTplStatus('Exporting…', 'loading');
+            document.getElementById('btnExportTemplate').disabled = true;
+            google.script.run
+              .withSuccessHandler(function(res) {
+                document.getElementById('btnExportTemplate').disabled = false;
+                if (res.success) {
+                  const area = document.getElementById('tplExportArea');
+                  const hint = document.getElementById('tplExportCopyHint');
+                  area.value = res.json;
+                  area.style.display = 'block';
+                  hint.style.display = 'block';
+                  area.select();
+                  setTplStatus('✅ JSON ready — click the box and press Ctrl+C to copy.', 'success');
+                } else {
+                  setTplStatus(res.message, 'error');
+                }
+              })
+              .withFailureHandler(function(err) {
+                document.getElementById('btnExportTemplate').disabled = false;
+                setTplStatus('Error: ' + err, 'error');
+              })
+              .exportTemplateAsJson(name);
+          }
+
+          function runImportTemplate() {
+            const json = (document.getElementById('tplImportArea').value || '').trim();
+            if (!json) { setTplStatus('Please paste the template JSON first.', 'error'); return; }
+            setTplStatus('Importing…', 'loading');
+            document.getElementById('btnImportTemplate').disabled = true;
+            google.script.run
+              .withSuccessHandler(function(res) {
+                document.getElementById('btnImportTemplate').disabled = false;
+                setTplStatus(res.message, res.success ? 'success' : 'error');
+                if (res.success) { document.getElementById('tplImportArea').value = ''; loadTemplateList(); }
+              })
+              .withFailureHandler(function(err) {
+                document.getElementById('btnImportTemplate').disabled = false;
+                setTplStatus('Error: ' + err, 'error');
+              })
+              .importTemplateFromJson(json);
+          }
+
+          // Load template list on sidebar open if templates tab is active
+          loadTemplateList();
         </script>
       </body>
     </html>

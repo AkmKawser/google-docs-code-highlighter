@@ -888,7 +888,7 @@ function getTablePreferences() {
     headerFontSize: 11,
     bodyFontSize: 9.5,
     padding: 'normal',
-    borderWidth: 1,
+    borderWidth: 1,   // Default: 1pt border (NOT 0 / borderless)
     inlineCodeHighlight: true,
     inlineCodeBg: '#EFF1F3',
     inlineCodeColor: '#B45309'
@@ -1254,10 +1254,11 @@ function isCodeLine(text) {
   if (/^\s{2,}|\t/.test(text)) return true;
   if (/^(return|break|continue|pass|throw|export|default)\b/.test(trimmed)) return true;
   if (/[{};]$/.test(trimmed)) return true;
-  // Colon-terminated identifiers (pseudocode method/property declarations)
-  if (/^[A-Za-z_$][\w$]*\s*[:(]/.test(trimmed)) return true;
-  // Single bare identifier (field name in a class body like 'items', 'customer')
-  if (/^[A-Za-z_$][\w$]*$/.test(trimmed)) return true;
+  // Colon-terminated identifiers (pseudocode method/property declarations with arguments or opening paren)
+  // EXCLUDE simple "Label: value" patterns that are body text
+  if (/^[A-Za-z_$][\w$]*\s*\(/.test(trimmed)) return true;
+  // Single bare identifier (field name in a class body) — only inside classContext, never standalone
+  // (removed broad single-identifier match to prevent inline tokens from becoming code blocks)
   return isCodeStart(text);
 }
 
@@ -1894,7 +1895,9 @@ function applySyntaxHighlight(textObj, options) {
 
   const kwColor   = normalizeHexColor(options.keywordColor, themeDef.kw);
   const strColor  = normalizeHexColor(options.stringColor, themeDef.str);
-  const comColor  = normalizeHexColor(options.commentColor, themeDef.com || '#6E7781');
+  // RULE: Comment color is always FIXED — user cannot change it; it is immune to theme changes.
+  const FIXED_COMMENT_COLOR = '#6E7781';
+  const comColor  = FIXED_COMMENT_COLOR;
   const numColor  = normalizeHexColor(options.numberColor, themeDef.num);
   const fnColor   = normalizeHexColor(options.functionColor, themeDef.fn || '#8250DF');
   const typeColor = normalizeHexColor(options.typeColor, themeDef.type || '#953800');
@@ -2959,9 +2962,17 @@ function formatDocumentTypography(options, preloadedBody) {
     }
 
     if (detection.role === 'title') {
-      safeSetHeading(p, getHeadingConstant('TITLE'));
-      formatSingleHeading(body, p, options.title);
-      titleCount++;
+      // RULE: Only ONE title ever. Once hasTitle is set, downgrade to heading1.
+      if (state.titleApplied) {
+        safeSetHeading(p, getHeadingConstant('HEADING1'));
+        formatSingleHeading(body, p, options.heading1);
+        h1Count++;
+      } else {
+        state.titleApplied = true;
+        safeSetHeading(p, getHeadingConstant('TITLE'));
+        formatSingleHeading(body, p, options.title);
+        titleCount++;
+      }
     } else if (detection.role === 'heading1') {
       safeSetHeading(p, getHeadingConstant('HEADING1'));
       formatSingleHeading(body, p, options.heading1);
@@ -2981,6 +2992,11 @@ function formatDocumentTypography(options, preloadedBody) {
       }
     }
   }
+
+  // 3. Ensure 1 blank paragraph before each non-code, non-banner data table
+  try {
+    ensureSingleNewlineBeforeDataTables(body);
+  } catch(e) {}
 
   const parts = [];
   if (titleCount > 0) parts.push(titleCount + ' title');
@@ -3156,7 +3172,8 @@ function formatSelectedAs(targetType, options) {
 }
 
 /**
- * Formats a single heading paragraph, handling background banner vs inline highlight
+ * Formats a single heading paragraph, handling background banner vs inline highlight.
+ * After formatting, ensures exactly 2 blank lines follow the heading for breathing room.
  */
 function formatSingleHeading(body, p, config) {
   if (!config) return;
@@ -3188,6 +3205,9 @@ function formatSingleHeading(body, p, config) {
   }
 
   applyHeadingStyles(targetPara, config, bgEnabled && bgStyle === 'inline' ? bgColor : null);
+
+  // RULE: After every heading/title, ensure exactly 2 blank newlines follow.
+  try { ensureDoubleNewlineAfterElement(body, targetPara); } catch(e) {}
 }
 
 /**
@@ -3294,7 +3314,8 @@ function applyHeadingStyles(para, config, inlineBgColor) {
 }
 
 /**
- * Applies typography options to a normal body paragraph
+ * Applies typography options to a normal body paragraph.
+ * Also bolds any text appearing before a colon (e.g. "My name is : " → bold).
  */
 function formatSingleBodyParagraph(para, config) {
   if (!para || !config) return;
@@ -3323,9 +3344,79 @@ function formatSingleBodyParagraph(para, config) {
 
       // Automatically detect and highlight inline code tokens (`code`)
       try { applyInlineBodyCodeHighlight(textObj); } catch(e) {}
+
+      // RULE: Bold any text that appears before a colon (e.g. "My name is : value")
+      try { applyColonBolding(textObj); } catch(e) {}
     }
   } catch(outerErr) {
     Logger.log('formatSingleBodyParagraph error: ' + outerErr);
+  }
+}
+
+/**
+ * Finds all occurrences of "text before colon" in a text object and bolds them.
+ * Handles: "Label: value", "My name is: ...", "Key : value".
+ * Does not bold inside backtick code spans or URL patterns.
+ */
+function applyColonBolding(textObj) {
+  const fullText = textObj.getText();
+  if (!fullText || fullText.length === 0) return;
+
+  // Match text before a colon that:
+  // - Has at least 1 word character before the colon
+  // - Does not look like a URL (http:// etc)
+  // - The colon is followed by a space, end-of-line, or end-of-string
+  const colonPattern = /([^:\n]+?)\s*(?::)(?=[\s]|$)/g;
+  let match;
+  while ((match = colonPattern.exec(fullText)) !== null) {
+    const beforeColon = match[1];
+    if (!beforeColon || !beforeColon.trim()) continue;
+
+    // Skip URL patterns like http://, https://, ftp://
+    if (/^https?$|^ftp$|^mailto$/i.test(beforeColon.trim())) continue;
+
+    // Skip if the text before colon looks like a code token (backtick or pure identifier)
+    if (/^`[^`]+`$/.test(beforeColon.trim())) continue;
+
+    const boldStart = match.index;
+    const boldEnd = boldStart + beforeColon.length - 1;
+    if (boldStart <= boldEnd && boldEnd < fullText.length) {
+      try { textObj.setBold(boldStart, boldEnd, true); } catch(e) {}
+    }
+  }
+}
+
+/**
+ * Ensures exactly 1 blank paragraph exists immediately before each non-code data table.
+ * This gives visual breathing room between text and a table.
+ */
+function ensureSingleNewlineBeforeDataTables(body) {
+  if (!body) return;
+  const tables = body.getTables();
+  if (!tables || tables.length === 0) return;
+
+  for (let t = 0; t < tables.length; t++) {
+    const table = tables[t];
+    // Skip code block and heading banner tables — only apply to real data tables
+    if (isCodeBlockTable(table) || isHeadingBannerTable(table)) continue;
+
+    const idx = body.getChildIndex(table);
+    if (idx <= 0) continue;
+
+    const prev = body.getChild(idx - 1);
+    if (!prev) continue;
+
+    // If the element immediately before the table is NOT an empty paragraph, insert one
+    const prevIsEmptyPara = prev.getType() === DocumentApp.ElementType.PARAGRAPH &&
+                            prev.asParagraph().getText().trim() === '';
+    if (!prevIsEmptyPara) {
+      try {
+        const newPara = body.insertParagraph(idx, '');
+        try { newPara.setFontFamily('Arial'); } catch(e) {}
+        try { newPara.setFontSize(11); } catch(e) {}
+        try { safeSetHeading(newPara, DocumentApp.ParagraphHeading.NORMAL); } catch(e) {}
+      } catch(e) {}
+    }
   }
 }
 
@@ -5742,7 +5833,7 @@ function getSidebarHtml() {
               bodyFontSize: document.getElementById('tableBodyFontSelect').value,
               padding: document.getElementById('tablePaddingSelect').value,
               textColor: '#1E293B',
-              borderWidth: parseFloat(document.getElementById('tableBorderWidthSelect').value) || 0,
+              borderWidth: parseFloat(document.getElementById('tableBorderWidthSelect').value) || 1,
               inlineCodeHighlight: document.getElementById('tInlineCodeToggle').checked,
               inlineCodeBg: document.getElementById('tInlineCodeBg').value,
               inlineCodeColor: document.getElementById('tInlineCodeColor').value
@@ -5859,8 +5950,9 @@ function getSidebarHtml() {
           function saveCurrentCodeOptions() {
             clearTimeout(_saveCodeTimer);
             _saveCodeTimer = setTimeout(function() {
+              // Persist ALL current code options (including token colors) to server
               google.script.run.saveUserPreferences(getCodeOptions());
-            }, 300);
+            }, 500);
           }
 
           function syncColorFromText(pickerId, hexVal) {
@@ -5907,20 +5999,21 @@ function getSidebarHtml() {
               document.getElementById('cBorderColor').value = t.border;
               document.getElementById('cKwColor').value = t.kw;
               document.getElementById('cStrColor').value = t.str;
-              document.getElementById('cComColor').value = t.com;
+              // NOTE: Comment color stays fixed at #6E7781 regardless of theme
+              document.getElementById('cComColor').value = '#6E7781';
               document.getElementById('cNumColor').value = t.num;
               if (document.getElementById('cFnColor')) document.getElementById('cFnColor').value = t.fn;
               if (document.getElementById('cTypeColor')) document.getElementById('cTypeColor').value = t.type;
             }
             syncAllHexInputs();
             updateCodePreview();
-            saveCurrentCodeOptions();
+            saveCurrentCodeOptions(); // Save theme change immediately
           }
 
           function setCodeCustomMode() {
             document.getElementById('codeThemeSelect').value = 'custom';
             updateCodePreview();
-            saveCurrentCodeOptions();
+            saveCurrentCodeOptions(); // Save immediately on every color change
           }
 
           function updateCodePreview() {

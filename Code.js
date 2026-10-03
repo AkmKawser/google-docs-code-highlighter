@@ -5297,7 +5297,7 @@ function getSidebarHtml() {
             }
 
             function appendStatus(line) {
-              if (statusEl) statusEl.innerText += (statusEl.innerText ? '\n' : '') + line;
+              if (statusEl) statusEl.innerText += (statusEl.innerText ? String.fromCharCode(10) : '') + line;
             }
 
             // Reset all indicators to idle
@@ -5878,9 +5878,9 @@ function getSidebarHtml() {
                     return '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #e5e7eb;">' +
                       '<span style="font-size:11px;font-weight:600;color:#1e3a8a;">📦 ' + escHtml(n) + '</span>' +
                       '<div style="display:flex;gap:4px;">' +
-                        '<button onclick="runLoadTemplate(\'' + escHtml(n) + '\')" ' +
+                        '<button data-name="' + escHtml(n) + '" onclick="runLoadTemplate(this.dataset.name)" ' +
                           'style="font-size:10px;padding:2px 7px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;">Load</button>' +
-                        '<button onclick="runDeleteTemplate(\'' + escHtml(n) + '\')" ' +
+                        '<button data-name="' + escHtml(n) + '" onclick="runDeleteTemplate(this.dataset.name)" ' +
                           'style="font-size:10px;padding:2px 7px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:4px;cursor:pointer;">✕</button>' +
                       '</div>' +
                     '</div>';

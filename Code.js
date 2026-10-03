@@ -889,6 +889,78 @@ function quickUndoAllCodeBlocks() {
 }
 
 /**
+ * Re-applies the current theme/colors to all existing 1x1 code block tables
+ * in the document without unwrapping and re-wrapping them.
+ * Called automatically at the start of highlightAllCodeBlocks().
+ */
+function reformatExistingCodeBlocks(body, options) {
+  const tables = body.getTables();
+  if (!tables || tables.length === 0) return 0;
+
+  const fontSize   = Number(options.fontSize) || 9.5;
+  const fontFamily = options.fontFamily || 'Consolas';
+  const textColor  = options.textColor  || '#24292F';
+  const bgColor    = options.bgColor    || '#F6F8FA';
+  const borderColor = options.borderColor || '#D0D7DE';
+
+  let count = 0;
+  for (let t = tables.length - 1; t >= 0; t--) {
+    const table = tables[t];
+    if (!isCodeBlockTable(table)) continue;
+
+    // Update table border
+    try { table.setBorderWidth(1); } catch(e) {}
+    try { table.setBorderColor(borderColor); } catch(e) {}
+
+    // Re-center column width
+    try {
+      const pageWidth   = body.getPageWidth();
+      const marginLeft  = body.getMarginLeft();
+      const marginRight = body.getMarginRight();
+      table.setColumnWidth(0, Math.max(100, pageWidth - marginLeft - marginRight));
+    } catch(e) {}
+
+    const cell = table.getRow(0).getCell(0);
+    try { cell.setBackgroundColor(bgColor); } catch(e) {}
+
+    const numChildren = cell.getNumChildren();
+    for (let i = 0; i < numChildren; i++) {
+      const child = cell.getChild(i);
+      if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
+      const line = child.asParagraph();
+
+      // Reset paragraph-level formatting
+      try { line.setFontFamily(fontFamily); } catch(e) {}
+      try { line.setFontSize(fontSize); } catch(e) {}
+      try { line.setLineSpacing(1.15); } catch(e) {}
+      try { line.setSpacingBefore(0); } catch(e) {}
+      try { line.setSpacingAfter(0); } catch(e) {}
+      try { line.setForegroundColor(textColor); } catch(e) {}
+
+      // Reset character-level formatting then re-apply syntax highlight
+      const textObj = line.editAsText();
+      const len = textObj.getText().length;
+      if (len > 0) {
+        try { textObj.setBold(false); } catch(e) {}
+        try { textObj.setFontFamily(fontFamily); } catch(e) {}
+        try { textObj.setFontSize(fontSize); } catch(e) {}
+        try { textObj.setForegroundColor(textColor); } catch(e) {}
+        try { textObj.setBackgroundColor(null); } catch(e) {}
+        // Re-apply per-token syntax highlighting
+        if (!options.skipSyntaxHighlight) {
+          applySyntaxHighlight(textObj, options);
+        }
+      }
+
+      // Throttle to avoid rate-limit errors on long code blocks
+      if (i > 0 && i % 10 === 0) Utilities.sleep(50);
+    }
+    count++;
+  }
+  return count;
+}
+
+/**
  * Core scanning & formatting function for code blocks
  */
 function highlightAllCodeBlocks(options, preloadedBody) {
@@ -899,6 +971,10 @@ function highlightAllCodeBlocks(options, preloadedBody) {
   saveUserPreferences(prefsToSave);
 
   const body = preloadedBody || DocumentApp.getActiveDocument().getBody();
+
+  // Step 1: Re-apply new theme to all already-formatted code blocks
+  const reformatCount = reformatExistingCodeBlocks(body, options);
+
   const paragraphs = body.getParagraphs();
   
   let codeGroups = [];
@@ -1044,7 +1120,14 @@ function highlightAllCodeBlocks(options, preloadedBody) {
     }
   }
 
-  return { success: true, count: codeGroups.length, message: 'Formatted ' + codeGroups.length + ' code block(s)!' };
+  return {
+    success: true,
+    count: codeGroups.length,
+    message: (reformatCount > 0 || codeGroups.length > 0)
+      ? (codeGroups.length > 0 ? 'Formatted ' + codeGroups.length + ' new code block(s)' : 'No new code blocks found') +
+        (reformatCount > 0 ? ' — re-applied theme to ' + reformatCount + ' existing block(s).' : '.')
+      : 'No code blocks found in this document.'
+  };
 }
 
 function getNetBraceCount(text) {

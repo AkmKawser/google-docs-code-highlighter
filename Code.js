@@ -2727,10 +2727,30 @@ function getHeadingConstant(type) {
 }
 
 /**
+ * Finds the very first non-empty paragraph in the document body.
+ */
+function getFirstNonEmptyDocumentParagraph(body) {
+  if (!body) return null;
+  const numChildren = body.getNumChildren();
+  for (let i = 0; i < numChildren; i++) {
+    const child = body.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const p = child.asParagraph();
+      if (p.getText().trim().length > 0) {
+        return p;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Intelligent classifier for document paragraphs:
- * Analyzes structure, markdown markers, numbering patterns, typography hints,
- * sentence punctuation, and context to automatically detect whether a paragraph
- * is a Title, Heading 1, Sub-Heading (H2/H3), or Body Text.
+ * MANDATORY RULE:
+ * - There is always only ONE title in the whole document.
+ * - THE first line of the document must be the Title.
+ * - So the Title formatting is applied to that text line only.
+ * - There cannot be any other title formatting in the document.
  */
 function detectTextRole(p, text, isFirstNonEmpty, state) {
   state = state || {};
@@ -2739,13 +2759,26 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     return { role: 'body', headingLevel: 0, cleanText: '' };
   }
 
-  // 1. Markdown syntax check (first # in document is always title if no title yet)
+  // 1. THE FIRST NON-EMPTY LINE OF THE DOCUMENT IS ALWAYS THE TITLE.
+  if (isFirstNonEmpty) {
+    let clean = text;
+    if (/^#\s+(.+)$/.test(clean)) {
+      clean = clean.replace(/^#\s+/, '').trim();
+    }
+    const titlePrefixMatch = clean.match(/^(?:Document\s+Title|Project\s+Title|Paper\s+Title|Report\s+Title|Title)\s*[:–—]\s*(.+)$/i);
+    if (titlePrefixMatch) {
+      clean = titlePrefixMatch[1].trim();
+    }
+    state.hasTitle = true;
+    state.titleApplied = true;
+    state.lastHeadingLevel = 1;
+    return { role: 'title', headingLevel: 1, cleanText: clean };
+  }
+
+  // 2. ALL OTHER LINES IN THE DOCUMENT CAN NEVER BE TITLE.
+  // Markdown syntax check
   if (/^#\s+(.+)$/.test(text)) {
     const clean = text.replace(/^#\s+/, '').trim();
-    if (!state.hasTitle) {
-      state.hasTitle = true;
-      return { role: 'title', headingLevel: 1, cleanText: clean };
-    }
     state.lastHeadingLevel = 1;
     return { role: 'heading1', headingLevel: 1, cleanText: clean };
   }
@@ -2765,37 +2798,22 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     return { role: 'sub', headingLevel: 3, cleanText: clean };
   }
 
-  // 2. Explicit Title prefixes: "Title: ...", "Document Title: ...", "Project Title: ..."
+  // Explicit Title prefixes: "Title: ...", "Document Title: ..." on later lines -> HEADING1
   const titlePrefixMatch = text.match(/^(?:Document\s+Title|Project\s+Title|Paper\s+Title|Report\s+Title|Title)\s*[:–—]\s*(.+)$/i);
   if (titlePrefixMatch) {
-    if (state.titleApplied) {
-      state.lastHeadingLevel = 1;
-      return { role: 'heading1', headingLevel: 1, cleanText: titlePrefixMatch[1].trim() };
-    }
-    state.hasTitle = true;
-    state.titleApplied = true;
-    return { role: 'title', headingLevel: 1, cleanText: titlePrefixMatch[1].trim() };
+    state.lastHeadingLevel = 1;
+    return { role: 'heading1', headingLevel: 1, cleanText: titlePrefixMatch[1].trim() };
   }
 
-  // 3. Pre-existing Google Docs formal headings (preserve unless overridden)
+  // Pre-existing Google Docs formal headings (preserve unless TITLE -> downgrade to HEADING1)
   let existingHeading = null;
   try { existingHeading = p.getHeading(); } catch(e) {}
   if (existingHeading && existingHeading !== DocumentApp.ParagraphHeading.NORMAL) {
     if (existingHeading === DocumentApp.ParagraphHeading.TITLE) {
-      // If a title was already applied earlier in the document, downgrade this to HEADING1
-      if (state.titleApplied) {
-        state.lastHeadingLevel = 1;
-        return { role: 'heading1', headingLevel: 1, cleanText: text };
-      }
-      state.hasTitle = true;
-      state.titleApplied = true;
-      return { role: 'title', headingLevel: 1, cleanText: text };
+      state.lastHeadingLevel = 1;
+      return { role: 'heading1', headingLevel: 1, cleanText: text };
     }
     if (existingHeading === (DocumentApp.ParagraphHeading.HEADING1 || DocumentApp.ParagraphHeading.HEADING_1)) {
-      if (!state.hasTitle && state.nonEmptyCount <= 2 && text.length <= 130) {
-        state.hasTitle = true;
-        return { role: 'title', headingLevel: 1, cleanText: text };
-      }
       state.lastHeadingLevel = 1;
       return { role: 'heading1', headingLevel: 1, cleanText: text };
     }
@@ -2810,20 +2828,19 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     return { role: 'sub', headingLevel: 3, cleanText: text };
   }
 
-  // 4. Exclude obvious non-headings (code blocks, quotes, bullet lists)
+  // Exclude obvious non-headings (code blocks, quotes, bullet lists)
   if (/^```/.test(text) || /^[-*•]\s+/.test(text) || /^>\s+/.test(text)) {
     return { role: 'body', headingLevel: 0, cleanText: text };
   }
 
-  // Common metadata prefixes at top of documents that shouldn't be titles
+  // Common metadata prefixes at top of documents that shouldn't be headings
   const isMetadataLine = /^(?:by|author|date|published|version|rev|changelog|copyright|table of contents|toc|license|page\s+\d+)[:\s]/i.test(text);
 
   // Check if text looks like a running narrative sentence
   const isNarrativeSentence = /[.;]$/.test(text) && !/^(?:etc|vs|vol|no|dr|mr|mrs|prof)\.$/i.test(text) && (text.split(/\s+/).length > 16 || /[.!?]\s+[A-Z]/.test(text));
 
-  // --- STRUCTURAL CHECKS (no API calls needed, pure text analysis) ---
-
-  // 5. Numbered Sub-sub-sections (H3): e.g. "1.1.1 Overview", "(a) Item"
+  // --- STRUCTURAL CHECKS ---
+  // Numbered Sub-sub-sections (H3): e.g. "1.1.1 Overview", "(a) Item"
   if (text.length <= 90 && !isNarrativeSentence) {
     if (/^\d+\.\d+\.\d+\.?\s+[A-Za-z]/.test(text) || /^\([a-z0-9]+\)\s+[A-Za-z]/i.test(text)) {
       state.lastHeadingLevel = 3;
@@ -2831,7 +2848,7 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // 6. Numbered Sub-sections (H2): e.g. "1.1 Background", "a) Setup", "Step 1:"
+  // Numbered Sub-sections (H2): e.g. "1.1 Background", "a) Setup", "Step 1:"
   if (text.length <= 90 && !isNarrativeSentence) {
     if (
       /^\d+\.\d+\.?\s+[A-Za-z]/.test(text) ||
@@ -2843,7 +2860,7 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // 7. Numbered Main Sections (H1): e.g. "1. Introduction", "I. Executive Summary"
+  // Numbered Main Sections (H1): e.g. "1. Introduction", "I. Executive Summary"
   if (text.length <= 90 && !isNarrativeSentence) {
     if (
       /^(?:\d+|[A-Z]|[IVXLCDM]+)\.\s+[A-Z]/.test(text) ||
@@ -2854,19 +2871,15 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
     }
   }
 
-  // 8. ALL CAPS Standalone Headings (H1): e.g. "EXECUTIVE SUMMARY"
+  // ALL CAPS Standalone Headings (H1): e.g. "EXECUTIVE SUMMARY"
   if (text.length >= 3 && text.length <= 60 && !isNarrativeSentence) {
     if (/^[A-Z0-9\s&,/:–—\-]+$/.test(text) && /[A-Z]{2,}/.test(text)) {
-      if (!state.hasTitle && state.nonEmptyCount <= 2) {
-        state.hasTitle = true;
-        return { role: 'title', headingLevel: 1, cleanText: text };
-      }
       state.lastHeadingLevel = 1;
       return { role: 'heading1', headingLevel: 1, cleanText: text };
     }
   }
 
-  // 9. Title Case Short Headers (e.g. "Key Architecture Overview")
+  // Title Case Short Headers (e.g. "Key Architecture Overview")
   if (text.length >= 4 && text.length <= 65 && !isNarrativeSentence) {
     const words = text.split(/\s+/);
     if (words.length >= 2 && words.length <= 8) {
@@ -2875,10 +2888,6 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
       if (majorWords.length > 0 && capCount / majorWords.length >= 0.8) {
         const hasCommonVerb = words.some(w => ['is','are','was','were','has','have','can','could','should','will','would'].includes(w.toLowerCase()));
         if (!hasCommonVerb) {
-          if (!state.hasTitle && state.nonEmptyCount <= 2) {
-            state.hasTitle = true;
-            return { role: 'title', headingLevel: 1, cleanText: text };
-          }
           const role = (state.lastHeadingLevel === 1) ? 'sub' : 'heading1';
           state.lastHeadingLevel = (role === 'sub') ? 2 : 1;
           return { role: role, headingLevel: (role === 'sub') ? 2 : 1, cleanText: text };
@@ -2888,54 +2897,27 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
   }
 
   // --- TYPOGRAPHY CHECKS (expensive API calls) ---
-  // These calls (editAsText, isBold, getFontSize, getAlignment) each cost a
-  // round-trip to the Document service. On large documents this causes
-  // "Service Documents failed" errors. Only run them for the very first
-  // non-empty paragraphs where a title/heading heuristic is actually useful.
-  // Everything else is classified by text pattern alone (free, no API call).
   const isPotentialHeading = state.nonEmptyCount <= 10 && text.length <= 130 && !isNarrativeSentence && !isMetadataLine;
 
   if (isPotentialHeading) {
     let isEntirelyBold = false;
     let maxFontSize = 0;
-    let alignment = null;
     try {
       const textObj = p.editAsText();
       if (textObj.getText().length > 0) {
         isEntirelyBold = textObj.isBold() === true;
         maxFontSize = Number(textObj.getFontSize(0)) || 0;
       }
-      alignment = p.getAlignment();
     } catch(e) {}
 
-    // 10. Document Top Title Heuristic (within first 3 non-empty paragraphs)
-    if (!state.hasTitle && state.nonEmptyCount <= 3 && !isMetadataLine) {
-      const words = text.split(/\s+/);
-      if (words.length <= 16 && text.length <= 130) {
-        const hasStyleCue = (maxFontSize >= 15) || isEntirelyBold || (alignment === DocumentApp.HorizontalAlignment.CENTER);
-        if (hasStyleCue || isFirstNonEmpty) {
-          state.hasTitle = true;
-          return { role: 'title', headingLevel: 1, cleanText: text };
-        }
-      }
-    }
-
-    // 11. Large font (>=18pt) heading detection
+    // Large font (>=18pt) heading detection -> HEADING1
     if (maxFontSize >= 18 && text.length <= 120) {
-      if (!state.hasTitle) {
-        state.hasTitle = true;
-        return { role: 'title', headingLevel: 1, cleanText: text };
-      }
       state.lastHeadingLevel = 1;
       return { role: 'heading1', headingLevel: 1, cleanText: text };
     }
 
-    // 12. Bold short headings
+    // Bold short headings -> HEADING1 or SUB
     if (isEntirelyBold && text.length <= 90) {
-      if (!state.hasTitle && state.nonEmptyCount <= 3) {
-        state.hasTitle = true;
-        return { role: 'title', headingLevel: 1, cleanText: text };
-      }
       if (state.lastHeadingLevel === 1 && text.length < 50) {
         state.lastHeadingLevel = 2;
         return { role: 'sub', headingLevel: 2, cleanText: text };
@@ -2944,23 +2926,10 @@ function detectTextRole(p, text, isFirstNonEmpty, state) {
       return { role: 'heading1', headingLevel: 1, cleanText: text };
     }
 
-    // 13. Medium font (14-17pt) heading detection
+    // Medium font (14-17pt) heading detection -> HEADING1
     if (maxFontSize >= 14 && text.length <= 90) {
-      if (!state.hasTitle && state.nonEmptyCount <= 3) {
-        state.hasTitle = true;
-        return { role: 'title', headingLevel: 1, cleanText: text };
-      }
       state.lastHeadingLevel = 1;
       return { role: 'heading1', headingLevel: 1, cleanText: text };
-    }
-
-    // 14. First non-empty line fallback (no styling cues needed)
-    if (isFirstNonEmpty && !state.hasTitle) {
-      const words = text.split(/\s+/);
-      if (words.length <= 16 && text.length <= 130) {
-        state.hasTitle = true;
-        return { role: 'title', headingLevel: 1, cleanText: text };
-      }
     }
   }
 
@@ -3102,7 +3071,7 @@ function formatSelectedTypography(options) {
   let bodyCount = 0;
 
   const state = { hasTitle: false, lastHeadingLevel: 0 };
-  let firstNonEmptyFound = false;
+  const firstDocParagraph = getFirstNonEmptyDocumentParagraph(body);
 
   for (let i = 0; i < elements.length; i++) {
     const el = elements[i];
@@ -3120,8 +3089,7 @@ function formatSelectedTypography(options) {
     const text = p.getText().trim();
     if (text.length === 0) continue;
 
-    const isFirstNonEmpty = !firstNonEmptyFound;
-    if (isFirstNonEmpty) firstNonEmptyFound = true;
+    const isFirstNonEmpty = (firstDocParagraph && p === firstDocParagraph);
 
     // Run auto-detection on this selected element
     const detection = detectTextRole(p, text, isFirstNonEmpty, state);
@@ -3202,8 +3170,14 @@ function formatSelectedAs(targetType, options) {
     if (!p) continue;
 
     if (targetType === 'title') {
-      // RULE: Only ONE title in the whole document.
-      // Downgrade any existing TITLE paragraphs to HEADING1 first.
+      // RULE: There is always only ONE title in the whole document.
+      // THE first line of the document must be the Title.
+      // So the Title formatting should be applied to that text line only.
+      // There cannot be any other title formatting in the document.
+      const firstDocP = getFirstNonEmptyDocumentParagraph(body);
+      const targetP = (firstDocP || p);
+
+      // Downgrade any other TITLE paragraphs in the document to HEADING1
       const numChildren = body.getNumChildren();
       for (let bi = 0; bi < numChildren; bi++) {
         const child = body.getChild(bi);
@@ -3211,14 +3185,22 @@ function formatSelectedAs(targetType, options) {
           const existPara = child.asParagraph();
           let existHeading = null;
           try { existHeading = existPara.getHeading(); } catch(ee) {}
-          if (existHeading === DocumentApp.ParagraphHeading.TITLE && existPara !== p) {
+          if (existHeading === DocumentApp.ParagraphHeading.TITLE && existPara !== targetP) {
             safeSetHeading(existPara, getHeadingConstant('HEADING1'));
             formatSingleHeading(body, existPara, options.heading1);
           }
         }
       }
-      safeSetHeading(p, getHeadingConstant('TITLE'));
-      formatSingleHeading(body, p, options.title);
+
+      // Title formatting is applied to the first line only
+      safeSetHeading(targetP, getHeadingConstant('TITLE'));
+      formatSingleHeading(body, targetP, options.title);
+
+      // If user selected a paragraph other than the first line, format that selection as HEADING1
+      if (p !== targetP) {
+        safeSetHeading(p, getHeadingConstant('HEADING1'));
+        formatSingleHeading(body, p, options.heading1);
+      }
       count++;
     } else if (targetType === 'heading1') {
       safeSetHeading(p, getHeadingConstant('HEADING1'));

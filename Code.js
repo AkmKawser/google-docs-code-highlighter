@@ -45,6 +45,8 @@ function onOpen() {
     .addSubMenu(DocumentApp.getUi().createMenu('📦 Formatting Templates')
       .addItem('💾 Save Current Settings as Template…', 'quickSaveTemplate')
       .addItem('📂 Load a Saved Template…', 'quickLoadTemplate')
+      .addItem('🔄 Reset to Default Template Settings', 'quickResetToDefaultTemplate')
+      .addSeparator()
       .addItem('📤 Export Template as JSON…', 'quickExportTemplate')
       .addItem('📥 Import Template from JSON…', 'quickImportTemplate')
     )
@@ -3924,10 +3926,144 @@ function importTemplateFromJson(jsonStr) {
     if (tpl.code)       saveUserPreferences(tpl.code);
     if (tpl.table)      saveTablePreferences(tpl.table);
     if (tpl.typography) saveTypographyPreferences(tpl.typography);
-    return { success: true, message: '✅ Template "' + name + '" imported & applied!' };
+    return { success: true, message: '✅ Template "' + name + '" imported & applied!', template: tpl };
   } catch(e) {
     return { success: false, message: '❌ Import failed: ' + e.message };
   }
+}
+
+/**
+ * Returns clean factory default settings for code blocks
+ */
+function getDefaultCodePreferences() {
+  const themeDef = (typeof CODE_THEMES !== 'undefined' && CODE_THEMES['github-light'])
+    ? CODE_THEMES['github-light']
+    : { bg: '#F6F8FA', text: '#24292F', border: '#D0D7DE', kw: '#CF222E', str: '#0A3069', com: '#6E7781', num: '#0550AE', fn: '#8250DF', type: '#953800' };
+
+  return {
+    theme: 'github-light',
+    fontSize: '9.5',
+    fontFamily: 'Consolas',
+    indentStyle: 'auto-2',
+    bgColor: themeDef.bg,
+    textColor: themeDef.text,
+    borderColor: themeDef.border,
+    keywordColor: themeDef.kw,
+    stringColor: themeDef.str,
+    commentColor: '#6E7781',
+    numberColor: themeDef.num,
+    functionColor: themeDef.fn,
+    typeColor: themeDef.type
+  };
+}
+
+/**
+ * Returns clean factory default settings for tables
+ */
+function getDefaultTablePreferences() {
+  return {
+    theme: 'corporate-navy',
+    headerBg: '#1E3A8A',
+    headerText: '#FFFFFF',
+    altRowBg: '#F0F7FF',
+    normalRowBg: '#FFFFFF',
+    borderColor: '#93C5FD',
+    textColor: '#1E293B',
+    fontFamily: 'Roboto',
+    headerFontSize: 11,
+    bodyFontSize: 9.5,
+    padding: 'normal',
+    borderWidth: 1,
+    inlineCodeHighlight: true,
+    inlineCodeBg: '#EFF1F3',
+    inlineCodeColor: '#B45309'
+  };
+}
+
+/**
+ * Returns clean factory default settings for typography
+ */
+function getDefaultTypographyPreferences() {
+  return {
+    preset: 'executive-navy',
+    title: {
+      fontFamily: 'Montserrat',
+      fontSize: 26,
+      textColor: '#1E3A8A',
+      alignment: 'CENTER',
+      bold: true,
+      bgEnabled: true,
+      bgColor: '#EFF6FF',
+      bgStyle: 'banner'
+    },
+    heading1: {
+      fontFamily: 'Montserrat',
+      fontSize: 18,
+      textColor: '#1E3A8A',
+      alignment: 'LEFT',
+      bold: true,
+      bgEnabled: true,
+      bgColor: '#EFF6FF',
+      bgStyle: 'inline'
+    },
+    subHeading: {
+      fontFamily: 'Montserrat',
+      fontSize: 14,
+      textColor: '#2563EB',
+      alignment: 'LEFT',
+      bold: true,
+      bgEnabled: false,
+      bgColor: '#F1F5F9',
+      bgStyle: 'inline'
+    },
+    body: {
+      applyToBody: true,
+      fontFamily: 'Roboto',
+      fontSize: 11,
+      textColor: '#1F2937',
+      alignment: 'LEFT'
+    }
+  };
+}
+
+/**
+ * Resets all formatting preferences (Code, Tables, Typography) back to factory default template
+ */
+function resetAllSettingsToDefault() {
+  try {
+    const codeDef = getDefaultCodePreferences();
+    const tableDef = getDefaultTablePreferences();
+    const typoDef = getDefaultTypographyPreferences();
+
+    saveUserPreferences(codeDef);
+    saveTablePreferences(tableDef);
+    saveTypographyPreferences(typoDef);
+
+    return {
+      success: true,
+      message: '✅ All settings reset to default template (Code, Table, Typography)!',
+      defaults: {
+        code: codeDef,
+        table: tableDef,
+        typography: typoDef
+      }
+    };
+  } catch (e) {
+    return { success: false, message: '❌ Failed to reset settings: ' + e.message };
+  }
+}
+
+/** Quick menu action: prompt and reset all settings to default template */
+function quickResetToDefaultTemplate() {
+  const ui = DocumentApp.getUi();
+  const resp = ui.alert(
+    '🔄 Reset to Default Template',
+    'Reset all Code, Table, and Typography settings back to factory default template?',
+    ui.ButtonSet.YES_NO
+  );
+  if (resp !== ui.Button.YES) return;
+  const res = resetAllSettingsToDefault();
+  ui.alert('📦 Templates', res.message, ui.ButtonSet.OK);
 }
 
 /** Quick menu action: prompt for name and save current settings */
@@ -5221,6 +5357,19 @@ function getSidebarHtml() {
             </button>
           </div>
 
+          <!-- Default Formatting Template Settings -->
+          <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:10px; margin-bottom:10px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-size:11px; font-weight:700; color:#334155;">🔄 Default Formatting Template</span>
+              <span style="font-size:10px; background:#e2e8f0; color:#475569; padding:2px 6px; border-radius:4px; font-weight:600;">Factory Defaults</span>
+            </div>
+            <div style="font-size:11px; color:#475569; margin-bottom:8px;">Restore Code (GitHub Light), Table (Corporate Navy), and Typography (Executive Navy) back to default template settings.</div>
+            <button class="btn-secondary" id="btnResetDefaultSettings" onclick="runResetDefaultSettings()"
+              style="width:100%; border-color:#94a3b8; color:#1e293b; font-weight:600; display:flex; align-items:center; justify-content:center; gap:6px; margin-top:0;">
+              <span>🔄</span> Apply Default Template Settings
+            </button>
+          </div>
+
           <!-- Saved Templates List -->
           <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:10px;">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
@@ -6393,11 +6542,79 @@ function getSidebarHtml() {
               .saveNamedTemplate(name);
           }
 
+          function applyPreferencesToUI(code, table, typo) {
+            // 1. Update Code Tab controls
+            if (code) {
+              if (document.getElementById('codeThemeSelect')) document.getElementById('codeThemeSelect').value = code.theme || 'github-light';
+              if (document.getElementById('codeFontSizeSelect')) document.getElementById('codeFontSizeSelect').value = code.fontSize || '9.5';
+              if (document.getElementById('codeFontFamilySelect')) document.getElementById('codeFontFamilySelect').value = code.fontFamily || 'Consolas';
+              if (document.getElementById('codeIndentSelect')) document.getElementById('codeIndentSelect').value = code.indentStyle || 'auto-2';
+              if (document.getElementById('cBgColor')) document.getElementById('cBgColor').value = code.bgColor || '#F6F8FA';
+              if (document.getElementById('cTextColor')) document.getElementById('cTextColor').value = code.textColor || '#24292F';
+              if (document.getElementById('cBorderColor')) document.getElementById('cBorderColor').value = code.borderColor || '#D0D7DE';
+              if (document.getElementById('cKwColor')) document.getElementById('cKwColor').value = code.keywordColor || '#CF222E';
+              if (document.getElementById('cStrColor')) document.getElementById('cStrColor').value = code.stringColor || '#0A3069';
+              if (document.getElementById('cComColor')) document.getElementById('cComColor').value = '#6E7781';
+              if (document.getElementById('cNumColor')) document.getElementById('cNumColor').value = code.numberColor || '#0550AE';
+              if (document.getElementById('cFnColor') && code.functionColor) document.getElementById('cFnColor').value = code.functionColor;
+              if (document.getElementById('cTypeColor') && code.typeColor) document.getElementById('cTypeColor').value = code.typeColor;
+              if (typeof syncAllHexInputs === 'function') syncAllHexInputs();
+              if (typeof updateCodePreview === 'function') updateCodePreview();
+            }
+
+            // 2. Update Table Tab controls
+            if (table) {
+              if (document.getElementById('tableThemeSelect') && table.theme) document.getElementById('tableThemeSelect').value = table.theme;
+              if (document.getElementById('tableFontSelect') && table.fontFamily) document.getElementById('tableFontSelect').value = table.fontFamily;
+              if (document.getElementById('tableHeaderFontSelect') && table.headerFontSize) document.getElementById('tableHeaderFontSelect').value = table.headerFontSize;
+              if (document.getElementById('tableBodyFontSelect') && table.bodyFontSize) document.getElementById('tableBodyFontSelect').value = table.bodyFontSize;
+              if (document.getElementById('tablePaddingSelect') && table.padding) document.getElementById('tablePaddingSelect').value = table.padding;
+              if (document.getElementById('tableBorderWidthSelect') && table.borderWidth !== undefined) document.getElementById('tableBorderWidthSelect').value = table.borderWidth;
+              if (document.getElementById('tHeaderBg') && table.headerBg) document.getElementById('tHeaderBg').value = table.headerBg;
+              if (document.getElementById('tHeaderText') && table.headerText) document.getElementById('tHeaderText').value = table.headerText;
+              if (document.getElementById('tAltRowBg') && table.altRowBg) document.getElementById('tAltRowBg').value = table.altRowBg;
+              if (document.getElementById('tNormalRowBg') && table.normalRowBg) document.getElementById('tNormalRowBg').value = table.normalRowBg;
+              if (document.getElementById('tBorderColor') && table.borderColor) document.getElementById('tBorderColor').value = table.borderColor;
+              if (typeof updateTablePreview === 'function') updateTablePreview();
+            }
+
+            // 3. Update Typography Tab controls
+            if (typo) {
+              if (document.getElementById('typoPresetSelect') && typo.preset) {
+                document.getElementById('typoPresetSelect').value = typo.preset;
+              }
+              if (typeof onTypographyPresetChange === 'function') onTypographyPresetChange();
+            }
+          }
+
+          function runResetDefaultSettings() {
+            if (!confirm('Reset all Code, Table, and Typography formatting settings to factory default template values?')) return;
+            setTplStatus('Restoring default settings…', 'loading');
+            const btn = document.getElementById('btnResetDefaultSettings');
+            if (btn) btn.disabled = true;
+            google.script.run
+              .withSuccessHandler(function(res) {
+                if (btn) btn.disabled = false;
+                setTplStatus(res.message, res.success ? 'success' : 'error');
+                if (res.success && res.defaults) {
+                  applyPreferencesToUI(res.defaults.code, res.defaults.table, res.defaults.typography);
+                }
+              })
+              .withFailureHandler(function(err) {
+                if (btn) btn.disabled = false;
+                setTplStatus('Error: ' + err, 'error');
+              })
+              .resetAllSettingsToDefault();
+          }
+
           function runLoadTemplate(name) {
             setTplStatus('Loading template "' + name + '"…', 'loading');
             google.script.run
               .withSuccessHandler(function(res) {
                 setTplStatus(res.message, res.success ? 'success' : 'error');
+                if (res.success && res.template) {
+                  applyPreferencesToUI(res.template.code, res.template.table, res.template.typography);
+                }
               })
               .withFailureHandler(function(err) {
                 setTplStatus('Error: ' + err, 'error');
@@ -6455,7 +6672,13 @@ function getSidebarHtml() {
               .withSuccessHandler(function(res) {
                 document.getElementById('btnImportTemplate').disabled = false;
                 setTplStatus(res.message, res.success ? 'success' : 'error');
-                if (res.success) { document.getElementById('tplImportArea').value = ''; loadTemplateList(); }
+                if (res.success) {
+                  document.getElementById('tplImportArea').value = '';
+                  loadTemplateList();
+                  if (res.template) {
+                    applyPreferencesToUI(res.template.code, res.template.table, res.template.typography);
+                  }
+                }
               })
               .withFailureHandler(function(err) {
                 document.getElementById('btnImportTemplate').disabled = false;
